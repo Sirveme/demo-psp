@@ -17,8 +17,12 @@
   <thead><tr><th>Hora</th><th>Nombre</th><th>Rubro</th><th>Monto</th><th>Segundos</th></tr></thead>
   <tbody id="s-filas"><tr><td colspan="5" class="vacio">Esperando la primera demostración…</td></tr></tbody>
 </table>
+<section class="sala-incidentes" id="s-incidentes" hidden>
+  <h2>Incidentes técnicos (últimos 15 min)</h2>
+  <ul id="s-incidentes-lista"></ul>
+</section>
 {% endblock %}
 {% block scripts %}
 <script>window.SALA = {clave: {{ clave|tojson }}};</script>
-<script src="/static/sala.js?v=1"></script>
+<script src="/static/sala.js?v=2"></script>
 {% endblock %}

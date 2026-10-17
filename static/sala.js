@@ -16,6 +16,13 @@
       $("#s-promedio").textContent = d.promedio ?? "–";
       $("#s-record").textContent = d.record ?? "–";
       $("#s-curso").textContent = d.en_curso ? `${d.en_curso} demostración${d.en_curso > 1 ? "es" : ""} en curso…` : "";
+      const inc = d.incidentes || [];
+      $("#s-incidentes").hidden = !inc.length;
+      $("#s-incidentes-lista").replaceChildren(...inc.map((i) => {
+        const li = document.createElement("li");
+        li.textContent = `${i.hora} · ${i.servicio} ${i.operacion} · ${i.detalle} · demo ${i.demo}`;
+        return li;
+      }));
       const tbody = $("#s-filas");
       if (!d.ultimas.length) return;
       tbody.replaceChildren(...d.ultimas.map((f) => {

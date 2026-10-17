@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import re
+from collections import deque
 from datetime import datetime, timedelta
 
 from app import config, limites
@@ -17,7 +18,36 @@ from app.servicios import facturalo, pagook
 log = logging.getLogger("demo.motor")
 
 ACTIVOS = ("esperando_pago", "pago_confirmado", "emitiendo", "enviando")
+VERIFICANDO = "Estamos verificando tu pago…"
 _tareas: dict[str, asyncio.Task] = {}
+_despertar: dict[str, asyncio.Event] = {}
+# Errores técnicos recientes (PagoOK/Facturalo): solo para el log y /sala, nunca para el cliente.
+incidentes: deque = deque(maxlen=20)
+
+
+def incidente(demo_id: str, servicio: str, operacion: str, status: int, detalle=None):
+    texto = "sin respuesta (red o timeout)" if status == 0 else f"HTTP {status}"
+    if detalle:
+        texto += f": {json.dumps(detalle, ensure_ascii=False)[:160]}"
+    log.warning("demo %s: %s %s -> %s", demo_id, servicio, operacion, texto)
+    incidentes.append({"en": config.ahora(), "demo": demo_id, "servicio": servicio,
+                       "operacion": operacion, "status": status, "detalle": texto})
+
+
+def despertar(demo_id: str):
+    """Interrumpe la espera entre consultas (p. ej. al recibir la hora del voucher)."""
+    ev = _despertar.get(demo_id)
+    if ev:
+        ev.set()
+
+
+async def _dormir(demo_id: str, segundos: float):
+    ev = _despertar.setdefault(demo_id, asyncio.Event())
+    try:
+        await asyncio.wait_for(ev.wait(), timeout=segundos)
+    except asyncio.TimeoutError:
+        pass
+    ev.clear()
 
 
 def asegurar_tarea(demo_id: str, estado: str):
@@ -101,22 +131,20 @@ async def _vigilar_pago(demo_id: str) -> bool:
         intervalo = 3 if edad < 180 else 5
 
         await limites.pagook.tomar()
-        if d.voucher_hora:
-            declarada, ventana = _voucher_iso(d.voucher_hora), 3
+        hora = d.voucher_hora
+        if hora:
+            declarada, ventana = _voucher_iso(hora), 3
         else:
             declarada, ventana = config.iso_lima(config.ahora()), 10
         status, r = await pagook.consultar(f"{d.monto:.2f}", declarada, ventana, d.titular)
         cambios = {"consultas_pagook": (d.consultas_pagook or 0) + 1}
 
         if status != 200:
-            if status == 429:
-                intervalo = 15
-            cambios["mensaje"] = ("La conexión con PagoOK está lenta. Seguimos vigilando tu pago…"
-                                  if status in (0, 429) or status >= 500 else
-                                  "No pudimos consultar PagoOK. Avísale al expositor.")
-            log.warning("demo %s: PagoOK HTTP %s", demo_id, status)
+            # 401/404/422/5xx/red: el detalle técnico va al log y a /sala; al cliente, un texto tranquilo.
+            incidente(demo_id, "PagoOK", "consultar", status, r)
+            cambios["mensaje"] = VERIFICANDO
             _guardar(demo_id, **cambios)
-            await asyncio.sleep(intervalo)
+            await _dormir(demo_id, 15 if status == 429 else intervalo)
             continue
 
         nivel = r.get("nivel")
@@ -124,21 +152,27 @@ async def _vigilar_pago(demo_id: str) -> bool:
         elegido = None
         if nivel == "alta" and _aceptable(r.get("pago"), d):
             elegido = r["pago"]
-        elif nivel == "media":
-            if d.voucher_hora:
-                # Con la hora del voucher (ventana de 3 min): si un único candidato es del titular,
-                # posterior al registro, es ese.
-                buenos = [p for p in r.get("candidatos") or []
-                          if p.get("coincide_nombre") is True and _aceptable(p, d)]
-                if len(buenos) == 1:
-                    elegido = buenos[0]
-                else:
-                    cambios["mensaje"] = ("Aún vemos más de un pago parecido. Revisa la hora de tu voucher "
-                                          "o pídele ayuda al expositor.")
+        elif nivel == "media" and hora:
+            # Con la hora del voucher (ventana de 3 min): si un único candidato es del titular,
+            # posterior al registro, es ese.
+            buenos = [p for p in r.get("candidatos") or []
+                      if p.get("coincide_nombre") is True and _aceptable(p, d)]
+            if len(buenos) == 1:
+                elegido = buenos[0]
             else:
-                cambios["mensaje"] = "Vemos más de un pago parecido. Escribe la hora que dice tu voucher."
+                cambios["mensaje"] = (f"A las {hora} vemos más de un pago parecido. Revisa la hora de tu "
+                                      "voucher o pídele ayuda al expositor.")
+        elif nivel == "media":
+            cambios["mensaje"] = "Vemos más de un pago parecido. Escribe la hora que dice tu voucher."
+        elif hora:
+            cambios["mensaje"] = f"Aún no aparece a las {hora}, seguimos buscando…"
         else:
             cambios["mensaje"] = None
+
+        if not elegido and _leer(demo_id).voucher_hora != hora:
+            # Llegó una hora de voucher mientras consultábamos: este resultado ya no aplica.
+            _guardar(demo_id, consultas_pagook=cambios["consultas_pagook"])
+            continue
 
         if elegido:
             st, u = await pagook.marcar_usado(elegido["pago_id"], referencia)
@@ -155,11 +189,11 @@ async def _vigilar_pago(demo_id: str) -> bool:
             if st == 409:
                 cambios["mensaje"] = "Ese pago ya se usó en otra demostración. Seguimos buscando el tuyo…"
             else:
-                cambios["mensaje"] = "Encontramos tu pago; lo estamos confirmando…"
-                log.warning("demo %s: marcar-usado HTTP %s %s", demo_id, st, u)
+                incidente(demo_id, "PagoOK", "marcar-usado", st, u)
+                cambios["mensaje"] = VERIFICANDO
                 intervalo = 2
         _guardar(demo_id, **cambios)
-        await asyncio.sleep(intervalo)
+        await _dormir(demo_id, intervalo)
 
 
 # --- Paso 3: el comprobante --------------------------------------------------------
@@ -206,13 +240,13 @@ async def _emitir(demo_id: str) -> bool:
             _guardar(demo_id, estado="enviando", mensaje=None, **_datos_comprobante(b.get("comprobante") or {}))
             return True
         if st == 0 or st >= 500 or st == 429:
-            log.warning("demo %s: Facturalo HTTP %s, reintento %s", demo_id, st, intento)
+            incidente(demo_id, "Facturalo", f"emitir (intento {intento})", st, b or None)
             _guardar(demo_id, mensaje="La conexión con Facturalo está lenta. Reintentando solo…")
             await asyncio.sleep(min(2 * intento, 10))
             continue
         # 4xx: datos o credencial. No se reintenta a ciegas.
         error = b.get("error") or b.get("detail") or f"HTTP {st}"
-        log.error("demo %s: Facturalo rechazó la emisión: %s %s", demo_id, st, json.dumps(b)[:300])
+        incidente(demo_id, "Facturalo", "emitir", st, b or None)
         _guardar(demo_id, estado="error_emision",
                  mensaje=f"Facturalo no aceptó los datos del comprobante: {error}. Tu pago quedó registrado; "
                          "el expositor lo resolverá contigo.")

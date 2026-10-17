@@ -24,7 +24,11 @@
     return {status: r.status, datos};
   }
 
+  // Cambia de paso solo si el paso cambia: los refrescos periódicos nunca mueven el scroll ni el foco.
+  let pasoActual = 0;
   function mostrarPaso(n) {
+    if (n === pasoActual) return;
+    pasoActual = n;
     [1, 2, 3].forEach((i) => { $("#paso" + i).hidden = i !== n; });
     $$(".pasos li").forEach((li) => {
       const p = Number(li.dataset.paso);
@@ -33,6 +37,10 @@
     });
     window.scrollTo({top: 0});
   }
+
+  // Escribe solo si el contenido cambió (no toca el DOM en cada consulta).
+  function texto(el, t) { if (el.textContent !== t) el.textContent = t; }
+  function oculto(el, h) { if (el.hidden !== h) el.hidden = h; }
 
   function errores(map, atributo = "data-error") {
     $$(`[${atributo}]`).forEach((el) => { el.textContent = (map || {})[el.getAttribute(atributo)] || ""; });
@@ -147,17 +155,37 @@
     setTimeout(() => { b.textContent = "Copiar"; }, 1800);
   });
 
+  // Hora enviada que el servidor aún no confirma: mientras tanto se muestra "Buscando…".
+  let voucherEnviado = null;
+  function estadoVoucher(t, ok = false) {
+    const el = $("#voucher-estado");
+    texto(el, t || "");
+    oculto(el, !t);
+    el.classList.toggle("ok", ok);
+  }
+
   $("#form-voucher").addEventListener("submit", async (e) => {
     e.preventDefault();
     const hora = $("#voucher-hora").value;
-    $("#voucher-error").textContent = "";
-    if (!/^\d{2}:\d{2}$/.test(hora)) { $("#voucher-error").textContent = "Escribe la hora como 14:05."; return; }
+    texto($("#voucher-error"), "");
+    if (!/^\d{2}:\d{2}$/.test(hora)) { texto($("#voucher-error"), "Escribe la hora como 14:05."); return; }
+    voucherEnviado = hora;
+    estadoVoucher(`Buscando tu pago a las ${hora}…`);
+    const btn = $("#btn-voucher");
+    btn.disabled = true;
     try {
       const {datos} = await api(`/api/demos/${demoId}/voucher`, {method: "POST", body: JSON.stringify({hora})});
-      if (!datos.ok) $("#voucher-error").textContent = datos.error || "No pudimos guardar la hora.";
-      else refrescar();
+      if (!datos.ok) {
+        voucherEnviado = null;
+        estadoVoucher("");
+        texto($("#voucher-error"), datos.error || "No pudimos guardar la hora. Intenta otra vez.");
+      }
     } catch (_) {
-      $("#voucher-error").textContent = "Sin conexión. Intenta otra vez.";
+      voucherEnviado = null;
+      estadoVoucher("");
+      texto($("#voucher-error"), "Sin conexión. Intenta otra vez.");
+    } finally {
+      btn.disabled = false;
     }
   });
 
@@ -199,34 +227,43 @@
     const enPago = d.estado === "esperando_pago" || d.estado === "expirado";
     if (enPago) {
       mostrarPaso(2);
-      $("#p2-monto").textContent = d.monto;
-      $("#p2-titular").textContent = d.titular;
+      texto($("#p2-monto"), d.monto);
+      texto($("#p2-titular"), d.titular);
       const expirado = d.estado === "expirado";
-      $("#p2-estado").hidden = expirado;
-      $("#p2-expirado").hidden = !expirado;
-      $("#voucher").hidden = expirado;
-      const msg = $("#p2-mensaje");
-      msg.textContent = d.mensaje || "";
-      msg.hidden = !d.mensaje;
-      if (d.nivel === "media" && !d.voucher_hora) {
-        $("#voucher").open = true;
-        $("#voucher").classList.add("destacado");
+      oculto($("#p2-estado"), expirado);
+      oculto($("#p2-expirado"), !expirado);
+      oculto($("#form-voucher"), expirado);
+      const voucherServidor = d.voucher_hora;
+      // El mensaje del servidor va junto al campo de hora si hay hora; si no, bajo el estado.
+      if (voucherEnviado && voucherServidor !== voucherEnviado) {
+        estadoVoucher(`Buscando tu pago a las ${voucherEnviado}…`);
+      } else if (voucherServidor) {
+        voucherEnviado = null;
+        estadoVoucher(d.mensaje || `Buscando tu pago a las ${voucherServidor}…`);
       }
-      if (d.voucher_hora && !$("#voucher-hora").value) $("#voucher-hora").value = d.voucher_hora;
+      const msg = $("#p2-mensaje");
+      const general = voucherServidor ? "" : (d.mensaje || "");
+      texto(msg, general);
+      oculto(msg, !general);
+      $("#form-voucher").classList.toggle("destacado", d.nivel === "media" && !voucherServidor);
+      if (voucherServidor && !$("#voucher-hora").value && document.activeElement !== $("#voucher-hora")) {
+        $("#voucher-hora").value = voucherServidor;
+      }
       return;
     }
 
     mostrarPaso(3);
+    texto($("#p3-ok"), d.voucher_hora ? `✓ Encontrado: pago de las ${d.voucher_hora} recibido` : "✓ Pago recibido");
     const listo = d.estado === "aceptado";
     const fallo = d.estado === "rechazado" || d.estado === "error_emision";
-    $("#p3-emitiendo").hidden = listo || fallo;
-    $("#p3-listo").hidden = !listo;
-    $("#p3-error").hidden = !fallo;
-    if (fallo) $("#p3-error-texto").textContent = d.mensaje || "No se pudo emitir el comprobante.";
+    oculto($("#p3-emitiendo"), listo || fallo);
+    oculto($("#p3-listo"), !listo);
+    oculto($("#p3-error"), !fallo);
+    if (fallo) texto($("#p3-error-texto"), d.mensaje || "No se pudo emitir el comprobante.");
     if (!listo) {
       const m = $("#p3-mensaje");
-      m.textContent = d.mensaje || "";
-      m.hidden = !d.mensaje;
+      texto(m, d.mensaje || "");
+      oculto(m, !d.mensaje);
       return;
     }
     $("#p3-segundos").textContent = d.segundos;
@@ -253,9 +290,9 @@
     if (!ultimo) return;
     const extra = Math.floor((performance.now() - recibido) / 1000);
     if (ultimo.estado === "esperando_pago") {
-      $("#p2-reloj").textContent = mmss(ultimo.esperando_seg + extra);
+      texto($("#p2-reloj"), mmss(ultimo.esperando_seg + extra));
     } else if (ultimo.emitiendo_seg != null && ultimo.estado !== "aceptado") {
-      $("#p3-reloj").textContent = mmss(ultimo.emitiendo_seg + extra);
+      texto($("#p3-reloj"), mmss(ultimo.emitiendo_seg + extra));
       const t = ultimo.estado === "pago_confirmado" || ultimo.estado === "emitiendo"
         ? "Emitiendo tu comprobante…" : "Esperando la respuesta de SUNAT…";
       $("#p3-estado").firstChild.textContent = t + " ";

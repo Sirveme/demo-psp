@@ -50,7 +50,13 @@ def _pago_json(p, declarada, nombre):
             "coincide_nombre": _coincide(nombre, p["contraparte"]) if nombre else None}
 
 
+FALLAS = {"status": 0, "veces": 0}     # fuerza respuestas de error de PagoOK en las pruebas
+
+
 def pagook_consultar(c: dict):
+    if FALLAS["veces"] > 0:
+        FALLAS["veces"] -= 1
+        return FALLAS["status"], {"detail": f"falla simulada {FALLAS['status']}"}
     declarada = config.desde_iso(c["fecha_hora_declarada"])
     v = timedelta(minutes=c.get("ventana_minutos", 15))
     nombre = c.get("nombre_pagador_declarado")

@@ -227,8 +227,9 @@ async def hora_voucher(demo_id: str, request: Request):
             raise HTTPException(404, "No encontramos esa demostración.")
         if d.estado == "esperando_pago":
             d.voucher_hora = hora
-            d.mensaje = f"Buscando tu pago cerca de las {hora}…"
+            d.mensaje = f"Buscando tu pago a las {hora}…"
             s.commit()
+    motor.despertar(demo_id)
     return {"ok": True}
 
 
@@ -312,6 +313,11 @@ async def api_sala(k: str = ""):
         "promedio": round(sum(segs) / len(segs), 1) if segs else None,
         "record": min(segs) if segs else None,
         "en_curso": en_curso,
+        # Errores técnicos de los últimos 15 min (los clientes solo ven "Estamos verificando tu pago").
+        "incidentes": [{"hora": config.hora_lima(i["en"]), "demo": i["demo"], "servicio": i["servicio"],
+                        "operacion": i["operacion"], "detalle": i["detalle"]}
+                       for i in reversed(motor.incidentes)
+                       if config.ahora() - i["en"] < timedelta(minutes=15)][:5],
     }
 
 
@@ -321,6 +327,12 @@ if config.MOCK:
     async def mock_yape(request: Request):
         b = await request.json()
         return mocks.registrar_pago(str(b.get("monto", "1.00")), b.get("nombre", ""), int(b.get("hace_seg", 0)))
+
+    @app.post("/mock/pagook-falla")
+    async def mock_falla(request: Request):
+        b = await request.json()
+        mocks.FALLAS.update(status=int(b.get("status", 500)), veces=int(b.get("veces", 1)))
+        return {"ok": True}
 
     @app.get("/mock/comprobante/{demo_id}")
     async def mock_comprobante(demo_id: str):

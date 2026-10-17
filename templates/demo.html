@@ -70,26 +70,28 @@
 <section id="paso2" class="paso" hidden>
   <p class="antetitulo">Yapea exactamente</p>
   <p class="monto-grande">S/ <span id="p2-monto">1.00</span></p>
-  {% if qr_yape %}<img class="qr-yape" src="{{ qr_yape }}" alt="QR de Yape de Perú Sistemas Pro">{% endif %}
+
+  <div class="vigilancia" aria-live="polite">
+    <p class="estado-vivo" id="p2-estado"><span id="p2-estado-texto">Esperando tu pago…</span> <span id="p2-reloj">0:00</span></p>
+    <p class="mensaje" id="p2-mensaje" hidden></p>
+  </div>
+
+  <form id="form-voucher" class="voucher">
+    <label for="voucher-hora">¿Ya pagaste y no aparece? Hora de tu voucher</label>
+    <div class="fila">
+      <input type="time" id="voucher-hora" required>
+      <button type="submit" class="secundario" id="btn-voucher">Usar esta hora</button>
+    </div>
+    <p class="voucher-estado" id="voucher-estado" aria-live="polite" hidden></p>
+    <p class="error" id="voucher-error"></p>
+  </form>
+
   <div class="numero">
     <span class="numero-texto" id="numero-yape">{{ yape[:3] }} {{ yape[3:6] }} {{ yape[6:] }}</span>
     <button type="button" class="secundario" id="btn-copiar" data-numero="{{ yape }}">Copiar</button>
   </div>
   <p class="ayuda centro">Perú Sistemas Pro · desde el Yape o Plin de <b id="p2-titular"></b></p>
-
-  <div class="vigilancia" aria-live="polite">
-    <p class="estado-vivo" id="p2-estado">Esperando tu pago… <span id="p2-reloj">0:00</span></p>
-    <p class="mensaje" id="p2-mensaje" hidden></p>
-  </div>
-
-  <details class="voucher" id="voucher">
-    <summary>¿Ya pagaste y no aparece? Dinos la hora de tu voucher</summary>
-    <form id="form-voucher" class="fila">
-      <input type="time" id="voucher-hora" required aria-label="Hora del voucher">
-      <button type="submit" class="secundario">Usar esta hora</button>
-    </form>
-    <p class="error" id="voucher-error"></p>
-  </details>
+  {% if qr_yape %}<img class="qr-yape" src="{{ qr_yape }}" alt="QR de Yape de Perú Sistemas Pro">{% endif %}
 
   <div id="p2-expirado" hidden>
     <button class="principal" type="button" id="btn-reintentar">Volver a intentar</button>
@@ -99,7 +101,7 @@
 <!-- PASO 3 -->
 <section id="paso3" class="paso" hidden>
   <div id="p3-emitiendo">
-    <p class="ok-pago">✓ Pago recibido</p>
+    <p class="ok-pago" id="p3-ok">✓ Pago recibido</p>
     <p class="estado-vivo" id="p3-estado">Emitiendo tu comprobante… <span id="p3-reloj">0:00</span></p>
     <p class="mensaje" id="p3-mensaje" hidden></p>
   </div>
@@ -159,5 +161,5 @@
 {% endblock %}
 {% block scripts %}
 <script>window.DEMO = {rubro: {{ r.slug|tojson }}};</script>
-<script src="/static/demo.js?v=1"></script>
+<script src="/static/demo.js?v=2"></script>
 {% endblock %}

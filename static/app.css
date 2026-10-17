@@ -103,21 +103,23 @@ button, .principal, .secundario { font: inherit; cursor: pointer; text-decoratio
 }
 
 /* Paso 2 */
-.monto-grande { font-size: 64px; font-weight: 800; text-align: center; margin: 4px 0 12px; letter-spacing: -.02em; }
+.monto-grande { font-size: 56px; font-weight: 800; text-align: center; margin: 0 0 8px; line-height: 1.1; letter-spacing: -.02em; }
 #paso2 .antetitulo { text-align: center; }
-.qr-yape { display: block; width: 240px; max-width: 80%; margin: 0 auto 14px; border-radius: 16px; }
+.qr-yape { display: block; width: 240px; max-width: 80%; margin: 18px auto 0; border-radius: 16px; }
 .numero { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
 .numero-texto { font-size: 34px; font-weight: 800; letter-spacing: .04em; }
-.vigilancia { margin: 24px 0 12px; padding: 16px; border-radius: var(--radio); background: var(--superficie); border: 1px solid var(--borde); text-align: center; }
+.vigilancia { margin: 0 0 12px; padding: 12px 14px; border-radius: var(--radio); background: var(--superficie); border: 1px solid var(--borde); text-align: center; }
 .estado-vivo { font-size: 20px; font-weight: 600; margin: 0; font-variant-numeric: tabular-nums; }
 .mensaje { color: var(--ambar); margin: 10px 0 0; }
 .mensaje.grande { font-size: 20px; }
-.voucher { margin: 12px 0 20px; color: var(--texto-2); }
-.voucher[open] { color: var(--texto); }
-.voucher summary { cursor: pointer; padding: 6px 0; }
-.voucher.destacado { border: 1px solid var(--ambar); border-radius: var(--radio); padding: 10px 14px; }
-.fila { display: flex; gap: 8px; margin-top: 8px; }
-.fila input { flex: 1; }
+.voucher { margin: 0 0 18px; }
+.voucher label { display: block; font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+.voucher.destacado { border: 1px solid var(--ambar); border-radius: var(--radio); padding: 10px 12px; }
+.voucher-estado { margin: 8px 0 0; font-weight: 600; color: var(--ambar); }
+.voucher-estado.ok { color: var(--verde); }
+.fila { display: flex; gap: 8px; }
+.fila input { flex: 1; min-width: 0; }
+.fila button { flex: none; }
 
 /* Paso 3 */
 .ok-pago { color: var(--verde); font-size: 22px; font-weight: 700; margin: 8px 0; }
@@ -168,6 +170,9 @@ body.sala .contenedor { max-width: 1200px; }
 .sala-tabla td:last-child { font-weight: 800; color: var(--verde); }
 .sala-tabla tr.nueva { animation: aparece .6s ease-out both; }
 .sala-tabla .vacio { color: var(--texto-2); text-align: center; }
+.sala-incidentes { margin-top: 28px; padding: 14px 18px; border: 1px solid var(--ambar); border-radius: var(--radio); }
+.sala-incidentes h2 { font-size: 18px; color: var(--ambar); }
+.sala-incidentes ul { margin: 0; padding-left: 20px; font-size: 16px; color: var(--texto-2); font-family: ui-monospace, Consolas, monospace; }
 @media (max-width: 700px) {
   .sala-cifras { grid-template-columns: 1fr; }
   .cifra-n { font-size: 48px; }
