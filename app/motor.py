@@ -116,6 +116,44 @@ def _aceptable(pago: dict, d: Demo) -> bool:
     return cuando is not None and cuando >= d.registrado_en - timedelta(seconds=60)
 
 
+def _voucher_dt(hhmm: str) -> datetime:
+    """HH:MM de hoy en Lima -> UTC sin zona (como se guarda en la base)."""
+    return config.desde_iso(_voucher_iso(hhmm))
+
+
+def elegir_candidato(candidatos: list[dict], registrado_en: datetime,
+                     voucher_hora: str | None) -> tuple[dict | None, str | None]:
+    """Regla para nivel=media. Devuelve (pago elegido, mensaje para la pantalla).
+
+    Solo cuentan los candidatos posteriores a registrado_en − 60 s, con nombre compatible con el
+    titular declarado y no usados:
+      - exactamente uno -> ese;
+      - ninguno -> seguir esperando;
+      - dos o más -> con la hora del voucher, el más cercano a ella, solo si el segundo más
+        cercano está a más de 2 min; sin hora, se pide; si no hay distancia clara, "verificando".
+    """
+    desde = registrado_en - timedelta(seconds=60)
+    buenos = []
+    for p in candidatos:
+        cuando = config.desde_iso(p.get("fecha_hora"))
+        if (cuando is not None and cuando >= desde and p.get("coincide_nombre") is not False
+                and p.get("estado") not in ("usado", "reclamado_por_otro_sistema")):
+            buenos.append((cuando, p))
+
+    if len(buenos) == 1:
+        return buenos[0][1], None
+    if not buenos:
+        return None, (f"Aún no aparece a las {voucher_hora}, seguimos buscando…" if voucher_hora else None)
+    if not voucher_hora:
+        return None, "Vemos más de un pago parecido. Escribe la hora que dice tu voucher."
+    ref = _voucher_dt(voucher_hora)
+    buenos.sort(key=lambda x: abs((x[0] - ref).total_seconds()))
+    segundo = abs((buenos[1][0] - ref).total_seconds())
+    if segundo > 120:
+        return buenos[0][1], None
+    return None, VERIFICANDO
+
+
 async def _vigilar_pago(demo_id: str) -> bool:
     """Devuelve True cuando el pago quedó confirmado y marcado como usado."""
     referencia = f"DEMO-{demo_id}"
@@ -152,18 +190,10 @@ async def _vigilar_pago(demo_id: str) -> bool:
         elegido = None
         if nivel == "alta" and _aceptable(r.get("pago"), d):
             elegido = r["pago"]
-        elif nivel == "media" and hora:
-            # Con la hora del voucher (ventana de 3 min): si un único candidato es del titular,
-            # posterior al registro, es ese.
-            buenos = [p for p in r.get("candidatos") or []
-                      if p.get("coincide_nombre") is True and _aceptable(p, d)]
-            if len(buenos) == 1:
-                elegido = buenos[0]
-            else:
-                cambios["mensaje"] = (f"A las {hora} vemos más de un pago parecido. Revisa la hora de tu "
-                                      "voucher o pídele ayuda al expositor.")
         elif nivel == "media":
-            cambios["mensaje"] = "Vemos más de un pago parecido. Escribe la hora que dice tu voucher."
+            elegido, mensaje = elegir_candidato(r.get("candidatos") or [], d.registrado_en, hora)
+            if not elegido:
+                cambios["mensaje"] = mensaje
         elif hora:
             cambios["mensaje"] = f"Aún no aparece a las {hora}, seguimos buscando…"
         else:
