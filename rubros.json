@@ -1,0 +1,53 @@
+{
+  "rubros": [
+    {
+      "slug": "ecommerce",
+      "nombre": "E-commerce",
+      "icono": "🛒",
+      "concepto": "Pedido de prueba – tienda online",
+      "que_destraba": "Tu pedido habría pasado a despacho, sin que nadie revise capturas de voucher."
+    },
+    {
+      "slug": "restaurante",
+      "nombre": "Restaurante o delivery",
+      "icono": "🍽️",
+      "concepto": "Pedido de prueba – restaurante o delivery",
+      "que_destraba": "Tu pedido habría entrado a cocina en ese mismo instante."
+    },
+    {
+      "slug": "servicios",
+      "nombre": "Servicios a domicilio",
+      "icono": "🛠️",
+      "concepto": "Servicio de prueba – atención a domicilio",
+      "que_destraba": "El técnico habría salido hacia tu casa, sin esperar confirmación manual."
+    },
+    {
+      "slug": "salud",
+      "nombre": "Salud (consultorio/clínica)",
+      "icono": "🩺",
+      "concepto": "Reserva de cita de prueba – consultorio",
+      "que_destraba": "Tu cita habría quedado confirmada automáticamente."
+    },
+    {
+      "slug": "educacion",
+      "nombre": "Educación (academia/cursos)",
+      "icono": "🎓",
+      "concepto": "Inscripción de prueba – curso",
+      "que_destraba": "Tu acceso al curso se habría habilitado solo."
+    },
+    {
+      "slug": "eventos",
+      "nombre": "Eventos y entradas",
+      "icono": "🎟️",
+      "concepto": "Entrada de prueba – evento",
+      "que_destraba": "Tu entrada con QR se habría emitido en ese momento."
+    },
+    {
+      "slug": "otro",
+      "nombre": "Otro",
+      "icono": "✨",
+      "concepto": "Venta de prueba – demostración PagoOK + Facturalo",
+      "que_destraba": "El siguiente paso de tu negocio habría continuado solo, sin intervención manual."
+    }
+  ]
+}

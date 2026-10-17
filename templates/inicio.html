@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block contenido %}
+<section class="intro">
+  <p class="antetitulo">Demostración en vivo · PagoOK + Facturalo.pro</p>
+  <h1>Paga S/ 1 con Yape y recibe tu comprobante <span class="acento">en segundos</span>.</h1>
+  <p class="bajada">Sin capturas de voucher. Sin nadie digitando. Es un comprobante real, aceptado por SUNAT.</p>
+</section>
+
+<section>
+  <h2 class="pregunta">¿A qué se dedica tu negocio?</h2>
+  <div class="rubros">
+    {% for r in rubros %}
+    <a class="rubro" href="/{{ r.slug }}">
+      <span class="rubro-icono" aria-hidden="true">{{ r.icono }}</span>
+      <span class="rubro-nombre">{{ r.nombre }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

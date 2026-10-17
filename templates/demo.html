@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block titulo %}{{ r.nombre }} · Paga y recibe tu comprobante · Perú Sistemas Pro{% endblock %}
+{% block barra %}<a class="chip" href="/" title="Cambiar de rubro">{{ r.icono }} {{ r.nombre }}</a>{% endblock %}
+{% block contenido %}
+<ol class="pasos" aria-label="Pasos">
+  <li data-paso="1" class="activo">1 · Tus datos</li>
+  <li data-paso="2">2 · Paga</li>
+  <li data-paso="3">3 · Tu comprobante</li>
+</ol>
+
+<!-- PASO 1 -->
+<section id="paso1" class="paso">
+  <h1>Tus datos</h1>
+  <form id="form-datos" novalidate>
+    <div class="segmentos" role="radiogroup" aria-label="Tipo de comprobante">
+      <label><input type="radio" name="tipo" value="boleta" checked><span>Boleta</span></label>
+      <label><input type="radio" name="tipo" value="factura"><span>Factura</span></label>
+    </div>
+
+    <div class="campo">
+      <label for="documento" id="lbl-documento">DNI <small>(opcional)</small></label>
+      <input id="documento" name="documento" inputmode="numeric" autocomplete="off" maxlength="11" placeholder="8 dígitos">
+      <p class="ayuda" id="estado-doc" aria-live="polite"></p>
+      <p class="error" data-error="documento"></p>
+    </div>
+
+    <div class="campo">
+      <label for="nombre" id="lbl-nombre">Tu nombre</label>
+      <input id="nombre" name="nombre" autocomplete="name" maxlength="200" placeholder="Como quieres que salga en la boleta">
+      <p class="error" data-error="nombre"></p>
+    </div>
+
+    <div class="campo solo-factura" hidden>
+      <label for="direccion">Dirección fiscal <small>(opcional)</small></label>
+      <input id="direccion" name="direccion" maxlength="250">
+    </div>
+
+    <div class="campo">
+      <label for="titular">Titular del Yape o Plin con el que vas a pagar</label>
+      <input id="titular" name="titular" autocomplete="off" maxlength="120" placeholder="Nombre y apellido, como figura en el app">
+      <p class="ayuda">Es el nombre que verá PagoOK en la notificación del pago.</p>
+      <p class="error" data-error="titular"></p>
+    </div>
+
+    <div class="campo">
+      <label for="monto">¿Cuánto vas a pagar?</label>
+      <div class="monto-input"><span>S/</span>
+        <input id="monto" name="monto" inputmode="decimal" value="1.00" maxlength="7">
+      </div>
+      <p class="ayuda">Mínimo S/ 1.00 · máximo S/ {{ "%.2f"|format(monto_maximo) }}</p>
+      <p class="error" data-error="monto"></p>
+    </div>
+
+    <div class="campo">
+      <span class="etiqueta">Pagarás con</span>
+      <div class="segmentos" role="radiogroup" aria-label="Billetera">
+        <label><input type="radio" name="billetera" value="yape" checked><span>Yape</span></label>
+        <label><input type="radio" name="billetera" value="plin"><span>Plin</span></label>
+        <label><input type="radio" name="billetera" value="otra"><span>Otra</span></label>
+      </div>
+    </div>
+
+    <p class="nota">Usamos tus datos solo para emitir tu comprobante. Banco de datos inscrito ante la ANPD.</p>
+    <p class="error general" id="error-general" aria-live="polite"></p>
+    <button class="principal" type="submit" id="btn-continuar">Continuar al pago</button>
+  </form>
+</section>
+
+<!-- PASO 2 -->
+<section id="paso2" class="paso" hidden>
+  <p class="antetitulo">Yapea exactamente</p>
+  <p class="monto-grande">S/ <span id="p2-monto">1.00</span></p>
+  {% if qr_yape %}<img class="qr-yape" src="{{ qr_yape }}" alt="QR de Yape de Perú Sistemas Pro">{% endif %}
+  <div class="numero">
+    <span class="numero-texto" id="numero-yape">{{ yape[:3] }} {{ yape[3:6] }} {{ yape[6:] }}</span>
+    <button type="button" class="secundario" id="btn-copiar" data-numero="{{ yape }}">Copiar</button>
+  </div>
+  <p class="ayuda centro">Perú Sistemas Pro · desde el Yape o Plin de <b id="p2-titular"></b></p>
+
+  <div class="vigilancia" aria-live="polite">
+    <p class="estado-vivo" id="p2-estado">Esperando tu pago… <span id="p2-reloj">0:00</span></p>
+    <p class="mensaje" id="p2-mensaje" hidden></p>
+  </div>
+
+  <details class="voucher" id="voucher">
+    <summary>¿Ya pagaste y no aparece? Dinos la hora de tu voucher</summary>
+    <form id="form-voucher" class="fila">
+      <input type="time" id="voucher-hora" required aria-label="Hora del voucher">
+      <button type="submit" class="secundario">Usar esta hora</button>
+    </form>
+    <p class="error" id="voucher-error"></p>
+  </details>
+
+  <div id="p2-expirado" hidden>
+    <button class="principal" type="button" id="btn-reintentar">Volver a intentar</button>
+  </div>
+</section>
+
+<!-- PASO 3 -->
+<section id="paso3" class="paso" hidden>
+  <div id="p3-emitiendo">
+    <p class="ok-pago">✓ Pago recibido</p>
+    <p class="estado-vivo" id="p3-estado">Emitiendo tu comprobante… <span id="p3-reloj">0:00</span></p>
+    <p class="mensaje" id="p3-mensaje" hidden></p>
+  </div>
+
+  <div id="p3-listo" hidden>
+    <div class="celebra">
+      <p class="antetitulo">Comprobante aceptado por SUNAT</p>
+      <p class="cifra">Tu comprobante salió en <b><span id="p3-segundos">0</span> segundos</b></p>
+      <p class="numero-comp" id="p3-numero"></p>
+    </div>
+
+    <ol class="linea-tiempo">
+      <li><span class="lt-hora" id="lt-registro"></span><span class="lt-texto">Registraste tus datos</span></li>
+      <li><span class="lt-hora" id="lt-pago"></span><span class="lt-texto">Pagaste <em id="lt-pago-dif"></em></span></li>
+      <li><span class="lt-hora" id="lt-sunat"></span><span class="lt-texto">SUNAT aceptó <em id="lt-sunat-dif"></em></span></li>
+    </ol>
+
+    <div class="bloque-valor">
+      <h2>Lo que acaba de pasar</h2>
+      <p>Nadie revisó tu voucher. Nadie digitó tu comprobante.</p>
+      <p class="destraba" id="p3-destraba"></p>
+    </div>
+
+    <div class="acciones">
+      <a class="principal" id="btn-pdf" target="_blank" rel="noopener">Ver PDF</a>
+      <a class="secundario" id="btn-descargar">Descargar</a>
+    </div>
+    <figure class="qr-pdf">
+      <img id="qr-pdf" alt="QR para abrir el comprobante en tu celular" width="180" height="180">
+      <figcaption>Escanéalo para abrirlo en tu celular</figcaption>
+    </figure>
+
+    <div class="interes">
+      <h2>¿Quieres esto en tu negocio?</h2>
+      <form id="form-interes" novalidate>
+        <div class="campo"><label for="i-nombre">Tu nombre</label><input id="i-nombre" maxlength="120" autocomplete="name">
+          <p class="error" data-error-i="nombre"></p></div>
+        <div class="campo"><label for="i-celular">Celular</label><input id="i-celular" inputmode="tel" maxlength="12" autocomplete="tel" placeholder="9 dígitos">
+          <p class="error" data-error-i="celular"></p></div>
+        <div class="campo"><label for="i-ruc">RUC de tu negocio <small>(opcional)</small></label><input id="i-ruc" inputmode="numeric" maxlength="11">
+          <p class="error" data-error-i="ruc"></p></div>
+        <p class="ayuda">Rubro: <b>{{ r.nombre }}</b></p>
+        <label class="check"><input type="checkbox" id="i-acepta"> Acepto que Perú Sistemas Pro me contacte por WhatsApp o llamada sobre PagoOK y Facturalo.</label>
+        <p class="error" data-error-i="acepta"></p>
+        <button class="principal" type="submit">Quiero esto en mi negocio</button>
+        <p class="ayuda" id="i-ok" hidden>¡Listo! Te abrimos WhatsApp para coordinar.</p>
+      </form>
+    </div>
+  </div>
+
+  <div id="p3-error" hidden>
+    <p class="mensaje grande" id="p3-error-texto"></p>
+  </div>
+
+  <a class="enlace-otra" href="/{{ r.slug }}">Hacer otra demostración</a>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.DEMO = {rubro: {{ r.slug|tojson }}};</script>
+<script src="/static/demo.js?v=1"></script>
+{% endblock %}

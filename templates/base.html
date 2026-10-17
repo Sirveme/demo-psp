@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d0f13">
+  <title>{% block titulo %}Paga y recibe tu comprobante · Perú Sistemas Pro{% endblock %}</title>
+  <meta name="description" content="Paga S/ 1 con Yape y recibe tu boleta o factura electrónica aceptada por SUNAT en segundos. PagoOK + Facturalo.pro.">
+  <link rel="icon" href="/static/img/psp-icono.jpg">
+  <link rel="stylesheet" href="/static/app.css?v=1">
+</head>
+<body class="{% block clase %}{% endblock %}">
+  <header class="barra">
+    <a class="marca" href="/">
+      <img src="/static/img/psp-icono.jpg" alt="" width="36" height="36">
+      <span>PERÚ SISTEMAS <b class="pro">PRO</b></span>
+    </a>
+    {% block barra %}{% endblock %}
+  </header>
+  <main class="contenedor">
+    {% block contenido %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

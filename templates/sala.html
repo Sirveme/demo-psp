@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block titulo %}Sala · Demo en vivo · Perú Sistemas Pro{% endblock %}
+{% block clase %}sala{% endblock %}
+{% block barra %}<span class="chip">demo.perusistemas.pro</span>{% endblock %}
+{% block contenido %}
+<section class="sala-cabecera">
+  <h1>Paga S/ 1 y recibe tu comprobante</h1>
+  <p class="bajada">Validado por PagoOK · emitido con Facturalo.pro · aceptado por SUNAT</p>
+</section>
+<section class="sala-cifras">
+  <div class="cifra-caja"><span class="cifra-n" id="s-total">0</span><span class="cifra-l">demostraciones hoy</span></div>
+  <div class="cifra-caja"><span class="cifra-n" id="s-promedio">–</span><span class="cifra-l">segundos en promedio</span></div>
+  <div class="cifra-caja record"><span class="cifra-n" id="s-record">–</span><span class="cifra-l">récord del día (s)</span></div>
+</section>
+<p class="sala-curso" id="s-curso"></p>
+<table class="sala-tabla">
+  <thead><tr><th>Hora</th><th>Nombre</th><th>Rubro</th><th>Monto</th><th>Segundos</th></tr></thead>
+  <tbody id="s-filas"><tr><td colspan="5" class="vacio">Esperando la primera demostración…</td></tr></tbody>
+</table>
+{% endblock %}
+{% block scripts %}
+<script>window.SALA = {clave: {{ clave|tojson }}};</script>
+<script src="/static/sala.js?v=1"></script>
+{% endblock %}
