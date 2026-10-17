@@ -1,6 +1,6 @@
 """Tablas de la demo. Cada demostración es una fila: no hay estado de negocio en memoria."""
 from sqlalchemy import (Boolean, Column, DateTime, Integer, Numeric, String, Text,
-                        create_engine)
+                        create_engine, text)
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app import config
@@ -30,7 +30,7 @@ class Demo(Base):
     # (expirado si no llega el pago en 10 min; error_emision si Facturalo rechaza los datos)
     estado = Column(String(20), nullable=False, default="esperando_pago")
     nivel = Column(String(20))                         # último nivel de PagoOK
-    mensaje = Column(String(300))                      # texto simple para la pantalla
+    mensaje = Column(String(500))                      # texto simple para la pantalla
     voucher_hora = Column(String(5))                   # HH:MM declarada por la persona
 
     registrado_en = Column(DateTime, nullable=False)
@@ -46,9 +46,10 @@ class Demo(Base):
 
     facturalo_id = Column(String(64))
     numero_formato = Column(String(30))
-    codigo_sunat = Column(String(10))
+    codigo_sunat = Column(String(40))                  # "0", "2335", "Client.0151"...
     mensaje_sunat = Column(String(500))
     leyenda = Column(Text)
+    reemisiones = Column(Integer, default=0)           # referencia_externa DEMO-{id}-R{n} al reemitir
 
 
 class Interesado(Base):
@@ -74,5 +75,27 @@ class CacheConsulta(Base):
     creado_en = Column(DateTime, nullable=False)
 
 
+# create_all no modifica tablas existentes: cambios de columnas ya desplegadas (idempotentes).
+_MIGRACIONES_PG = [
+    "ALTER TABLE demos ALTER COLUMN codigo_sunat TYPE VARCHAR(40)",
+    "ALTER TABLE demos ALTER COLUMN mensaje TYPE VARCHAR(500)",
+    "ALTER TABLE demos ADD COLUMN IF NOT EXISTS reemisiones INTEGER DEFAULT 0",
+]
+
+
 def crear_tablas():
     Base.metadata.create_all(engine)
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as con:
+            for sql in _MIGRACIONES_PG:
+                con.execute(text(sql))
+
+
+def recortar(modelo, campos: dict) -> dict:
+    """Recorta los textos al largo de su columna: un mensaje largo de SUNAT nunca debe romper el guardado."""
+    out = {}
+    for k, v in campos.items():
+        col = modelo.__table__.columns.get(k)
+        largo = getattr(getattr(col, "type", None), "length", None)
+        out[k] = v[:largo] if isinstance(v, str) and largo else v
+    return out

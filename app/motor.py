@@ -11,7 +11,7 @@ from collections import deque
 from datetime import datetime, timedelta
 
 from app import config, limites
-from app.db import Demo, Sesion
+from app.db import Demo, Sesion, recortar
 from app.rubros import rubro
 from app.servicios import facturalo, pagook
 
@@ -19,6 +19,7 @@ log = logging.getLogger("demo.motor")
 
 ACTIVOS = ("esperando_pago", "pago_confirmado", "emitiendo", "enviando")
 VERIFICANDO = "Estamos verificando tu pago…"
+TERMINALES_LOG = ("aceptado", "aceptado_con_observaciones", "rechazado", "anulado")
 _tareas: dict[str, asyncio.Task] = {}
 _despertar: dict[str, asyncio.Event] = {}
 # Errores técnicos recientes (PagoOK/Facturalo): solo para el log y /sala, nunca para el cliente.
@@ -26,7 +27,7 @@ incidentes: deque = deque(maxlen=20)
 
 
 def incidente(demo_id: str, servicio: str, operacion: str, status: int, detalle=None):
-    texto = "sin respuesta (red o timeout)" if status == 0 else f"HTTP {status}"
+    texto = {0: "sin respuesta (red o timeout)", -1: "excepción"}.get(status, f"HTTP {status}")
     if detalle:
         texto += f": {json.dumps(detalle, ensure_ascii=False)[:160]}"
     log.warning("demo %s: %s %s -> %s", demo_id, servicio, operacion, texto)
@@ -59,6 +60,14 @@ def asegurar_tarea(demo_id: str, estado: str):
     _tareas[demo_id] = asyncio.create_task(_ciclo(demo_id), name=f"demo-{demo_id}")
 
 
+def reiniciar(demo_id: str):
+    """Cancela la tarea en curso de la demo (si hay) y la relanza desde lo que diga la base."""
+    t = _tareas.pop(demo_id, None)
+    if t and not t.done():
+        t.cancel()
+    asegurar_tarea(demo_id, _leer(demo_id).estado)
+
+
 def reanudar_pendientes():
     """Al arrancar: relanza las demos que quedaron a medio camino (máx. 30 min de antigüedad)."""
     limite = config.ahora() - timedelta(minutes=30)
@@ -77,7 +86,7 @@ def _leer(demo_id: str) -> Demo:
 def _guardar(demo_id: str, **campos):
     with Sesion() as s:
         d = s.get(Demo, demo_id)
-        for k, v in campos.items():
+        for k, v in recortar(Demo, campos).items():
             setattr(d, k, v)
         s.commit()
 
@@ -93,8 +102,9 @@ async def _ciclo(demo_id: str):
             if not await _emitir(demo_id):
                 return
         await _esperar_sunat(demo_id)
-    except Exception:
+    except Exception as e:
         log.exception("demo %s", demo_id)
+        incidente(demo_id, "demo-psp", "error interno", -1, f"{type(e).__name__}: {str(e)[:200]}")
         _guardar(demo_id, mensaje="Tuvimos un problema interno. Seguimos intentando…")
         await asyncio.sleep(5)
         _tareas.pop(demo_id, None)
@@ -114,6 +124,17 @@ def _aceptable(pago: dict, d: Demo) -> bool:
         return False
     cuando = config.desde_iso(pago.get("fecha_hora"))
     return cuando is not None and cuando >= d.registrado_en - timedelta(seconds=60)
+
+
+def _resumen(pagos) -> str:
+    return "[" + ", ".join(f"{p.get('pago_id')}@{(p.get('fecha_hora') or '')[11:19]}"
+                           f"/{p.get('contraparte')!r}/nombre={p.get('coincide_nombre')}"
+                           for p in (pagos or [])) + "]"
+
+
+def referencia(d: Demo) -> str:
+    """referencia_externa en Facturalo. Al reemitir cambia (-R1, -R2…) para no reutilizar el rechazado."""
+    return f"DEMO-{d.id}" + (f"-R{d.reemisiones}" if d.reemisiones else "")
 
 
 def _voucher_dt(hhmm: str) -> datetime:
@@ -176,6 +197,11 @@ async def _vigilar_pago(demo_id: str) -> bool:
             declarada, ventana = config.iso_lima(config.ahora()), 10
         status, r = await pagook.consultar(f"{d.monto:.2f}", declarada, ventana, d.titular)
         cambios = {"consultas_pagook": (d.consultas_pagook or 0) + 1}
+        log.info("demo %s PagoOK consultar monto=%s declarada=%s ventana=%s nombre=%r -> HTTP %s nivel=%s "
+                 "motivo=%s pago=%s candidatos=%s ya_usados=%s", demo_id, f"{d.monto:.2f}", declarada, ventana,
+                 d.titular, status, r.get("nivel"), r.get("motivo"),
+                 _resumen([r["pago"]] if r.get("pago") else []), _resumen(r.get("candidatos")),
+                 _resumen(r.get("pagos_ya_usados")))
 
         if status != 200:
             # 401/404/422/5xx/red: el detalle técnico va al log y a /sala; al cliente, un texto tranquilo.
@@ -246,13 +272,13 @@ def _datos_comprobante(c: dict) -> dict:
 
 async def _emitir(demo_id: str) -> bool:
     d = _leer(demo_id)
-    referencia = f"DEMO-{demo_id}"
+    ref = referencia(d)
     intento = 0
     while True:
         intento += 1
         # Idempotencia: la API no deduplica; antes de (re)intentar, ¿ya existe?
         if d.estado == "emitiendo" or intento > 1:
-            st, b = await facturalo.buscar_referencia(referencia)
+            st, b = await facturalo.buscar_referencia(ref)
             if st == 200 and b.get("exito") and (b.get("comprobante") or {}).get("id"):
                 _guardar(demo_id, estado="enviando", mensaje=None,
                          emitido_en=d.emitido_en or config.ahora(), **_datos_comprobante(b["comprobante"]))
@@ -264,7 +290,12 @@ async def _emitir(demo_id: str) -> bool:
                  mensaje="Emitiendo tu comprobante…" if intento == 1 else "Reintentando la emisión…")
         d = _leer(demo_id)
         concepto = rubro(d.rubro)["concepto"]
-        st, b = await facturalo.emitir(facturalo.cuerpo_emision(d, concepto, texto))
+        cuerpo = facturalo.cuerpo_emision(d, concepto, texto, ref)
+        log.info("demo %s Facturalo emitir tipo=%s serie=%s cliente=%s/%s total=%s ref=%s", demo_id,
+                 cuerpo["tipo_comprobante"], cuerpo.get("serie", "(auto)"), cuerpo["cliente"]["tipo_documento"],
+                 cuerpo["cliente"]["numero_documento"], d.monto, ref)
+        st, b = await facturalo.emitir(cuerpo)
+        log.info("demo %s Facturalo emitir -> HTTP %s %s", demo_id, st, json.dumps(b, ensure_ascii=False)[:400])
 
         if st == 200 and b.get("exito"):
             _guardar(demo_id, estado="enviando", mensaje=None, **_datos_comprobante(b.get("comprobante") or {}))
@@ -296,8 +327,13 @@ async def _esperar_sunat(demo_id: str):
             return
         st, b = await facturalo.consultar(d.facturalo_id)
         c = (b or {}).get("comprobante") or {}
+        if st != 200:
+            incidente(demo_id, "Facturalo", f"GET /comprobantes/{d.facturalo_id}", st, b or None)
         if st == 200 and c:
             estado = c.get("estado")
+            if estado in TERMINALES_LOG:
+                log.info("demo %s Facturalo %s -> %s codigo=%s %s", demo_id, c.get("numero_formato"), estado,
+                         c.get("codigo_sunat"), (c.get("mensaje_sunat") or "")[:300])
             datos = _datos_comprobante(c)
             datos.pop("facturalo_id", None)
             if estado in facturalo.ACEPTADOS:

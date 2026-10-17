@@ -4,6 +4,7 @@ Emisión asíncrona: POST /comprobantes devuelve 'encolado'; el CDR se obtiene c
 GET /comprobantes/{id}. Devuelven (status, body); status 0 = red o timeout.
 """
 import logging
+import re
 from decimal import ROUND_HALF_UP, Decimal
 
 import httpx
@@ -19,6 +20,15 @@ TERMINALES = ACEPTADOS + ("rechazado", "anulado")
 
 def configurado() -> bool:
     return config.MOCK or bool(config.FACTURALO_API_KEY and config.FACTURALO_API_SECRET)
+
+
+def problema_series() -> str | None:
+    """SUNAT exige B### para boletas y F### para facturas. Otra serie = rechazo seguro (Client.0151)."""
+    if config.FACTURALO_SERIE_BOLETA and not re.fullmatch(r"B[A-Z0-9]{3}", config.FACTURALO_SERIE_BOLETA):
+        return f"FACTURALO_SERIE_BOLETA={config.FACTURALO_SERIE_BOLETA} no es válida (debe ser B + 3, p. ej. B001)"
+    if config.FACTURALO_SERIE_FACTURA and not re.fullmatch(r"F[A-Z0-9]{3}", config.FACTURALO_SERIE_FACTURA):
+        return f"FACTURALO_SERIE_FACTURA={config.FACTURALO_SERIE_FACTURA} no es válida (debe ser F + 3, p. ej. F001)"
+    return None
 
 
 def base() -> str:
@@ -75,7 +85,7 @@ def montos_cercanos(total: Decimal) -> list[str]:
     return [f"{m:.2f}" for m in (abajo, arriba) if m is not None and m >= 1]
 
 
-def cuerpo_emision(demo, concepto: str, leyenda: str) -> dict:
+def cuerpo_emision(demo, concepto: str, leyenda: str, referencia: str) -> dict:
     tipo = "01" if demo.tipo == "factura" else "03"
     cliente = {"tipo_documento": demo.doc_tipo, "numero_documento": demo.doc_numero,
                "razon_social": demo.cliente_nombre[:200]}
@@ -94,7 +104,7 @@ def cuerpo_emision(demo, concepto: str, leyenda: str) -> dict:
         "observaciones": leyenda[:500],
         "forma_pago": "Contado",
         "enviar_email": False,
-        "referencia_externa": f"DEMO-{demo.id}",
+        "referencia_externa": referencia,
     }
     serie = config.FACTURALO_SERIE_FACTURA if tipo == "01" else config.FACTURALO_SERIE_BOLETA
     if serie:

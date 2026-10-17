@@ -106,15 +106,23 @@ def facturalo_emitir(c: dict):
             "numero_formato": f"{serie}-{n:08d}", "total": round(round(precio, 2) + round(round(precio, 2) * 0.18, 2), 2),
             "estado": "encolado", "codigo_sunat": None, "mensaje_sunat": None,
             "referencia_externa": c.get("referencia_externa"), "observaciones": c.get("observaciones"),
-            "_t": time.monotonic()}
+            "_t": time.monotonic(), "_rechazar": RECHAZOS["veces"] > 0}
+    RECHAZOS["veces"] = max(0, RECHAZOS["veces"] - 1)
     _COMPROBANTES[cid] = comp
     return 200, {"exito": True, "comprobante": {k: v for k, v in comp.items() if not k.startswith("_")}}
+
+
+RECHAZOS = {"veces": 0}    # próximos comprobantes que SUNAT rechaza (como el Client.0151 real)
 
 
 def facturalo_consultar(cid: str):
     comp = _COMPROBANTES.get(cid)
     if not comp:
         return 404, {"exito": False, "codigo": "NOT_FOUND"}
+    if comp.get("_rechazar") and time.monotonic() - comp["_t"] > 1.0 and comp["estado"] == "encolado":
+        comp.update(estado="rechazado", codigo_sunat="Client.0151",
+                    mensaje_sunat="El nombre del archivo ZIP es incorrecto - Detalle: xxx.xxx.xxx value='ticket: "
+                                  "202622241396332 error: Validation ZIP Filename error: 20616219686-03-DB99-1.zip'")
     if time.monotonic() - comp["_t"] > 2.0 and comp["estado"] == "encolado":
         comp.update(estado="aceptado", codigo_sunat="0",
                     mensaje_sunat=f"El comprobante {comp['numero_formato']} ha sido aceptado")

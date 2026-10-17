@@ -82,6 +82,9 @@ async def portada(request: Request):
 async def salud():
     return {"ok": True, "mock": config.MOCK, "pagook": pagook.configurado(),
             "facturalo": facturalo.configurado(), "apis_net": bool(config.APIS_NET_TOKEN),
+            "series": facturalo.problema_series() or "ok",
+            "serie_boleta": config.FACTURALO_SERIE_BOLETA or "(auto)",
+            "serie_factura": config.FACTURALO_SERIE_FACTURA or "(auto)",
             "pagook_consultas_ultimo_minuto": limites.pagook.usadas()}
 
 
@@ -165,6 +168,10 @@ async def crear_demo(request: Request):
         return JSONResponse({"ok": False, "errores": errores}, status_code=422)
     if not (pagook.configurado() and facturalo.configurado()):
         raise HTTPException(503, "La demo aún no está configurada. Avísale al expositor.")
+    if (problema := facturalo.problema_series()):
+        # Mejor no cobrar que cobrar un comprobante que SUNAT va a rechazar.
+        motor.incidente("-", "configuración", "series", -1, problema)
+        raise HTTPException(503, "La demo está en mantenimiento por un momento. Avísale al expositor.")
 
     demo_id = "".join(secrets.choice(ALFABETO) for _ in range(10))
     with Sesion() as s:
@@ -321,6 +328,39 @@ async def api_sala(k: str = ""):
     }
 
 
+# --- Operación: reemitir sin pedir otro pago -----------------------------------------------
+@app.post("/api/admin/demos/{demo_id}/reemitir")
+async def reemitir(demo_id: str, k: str = ""):
+    """Vuelve a emitir el comprobante de una demo cuyo pago ya está confirmado y marcado como usado.
+
+    Usa una referencia_externa nueva (DEMO-{id}-R{n}) para no reutilizar el comprobante rechazado.
+    Protegido con la misma clave de /sala.
+    """
+    if not config.SALA_CLAVE or not secrets.compare_digest(k, config.SALA_CLAVE):
+        raise HTTPException(404, "No encontrado")
+    if (problema := facturalo.problema_series()):
+        raise HTTPException(409, f"Corrige la configuración antes de reemitir: {problema}")
+    with Sesion() as s:
+        d = s.get(Demo, demo_id)
+        if not d:
+            raise HTTPException(404, "No existe esa demo.")
+        if not d.pagook_pago_id or not d.pago_en:
+            raise HTTPException(409, "Esa demo no tiene un pago confirmado.")
+        if d.estado == "aceptado":
+            raise HTTPException(409, f"Ya está aceptado: {d.numero_formato}.")
+        anterior = {"estado": d.estado, "numero": d.numero_formato, "codigo_sunat": d.codigo_sunat}
+        d.reemisiones = (d.reemisiones or 0) + 1
+        d.estado, d.mensaje = "pago_confirmado", None
+        d.facturalo_id = d.numero_formato = d.codigo_sunat = d.mensaje_sunat = None
+        d.emitido_en = d.aceptado_en = d.segundos = None
+        s.commit()
+        ref = motor.referencia(d)
+    motor.reiniciar(demo_id)
+    log.warning("demo %s reemitida (%s) desde %s", demo_id, ref, anterior)
+    return {"ok": True, "demo": demo_id, "referencia_externa": ref, "anterior": anterior,
+            "seguir": f"/api/demos/{demo_id}"}
+
+
 # --- Solo local: simular un Yape --------------------------------------------------------
 if config.MOCK:
     @app.post("/mock/yape")
@@ -332,6 +372,11 @@ if config.MOCK:
     async def mock_falla(request: Request):
         b = await request.json()
         mocks.FALLAS.update(status=int(b.get("status", 500)), veces=int(b.get("veces", 1)))
+        return {"ok": True}
+
+    @app.post("/mock/facturalo-rechazo")
+    async def mock_rechazo(request: Request):
+        mocks.RECHAZOS["veces"] = int((await request.json()).get("veces", 1))
         return {"ok": True}
 
     @app.get("/mock/comprobante/{demo_id}")
