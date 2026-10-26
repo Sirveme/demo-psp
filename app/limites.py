@@ -35,7 +35,7 @@ def permitido(tipo: str, ip: str) -> bool:
 class Presupuesto:
     """Ventana deslizante de 60 s: como mucho N consultas por minuto entre todas las demos.
 
-    La credencial de PagoOK es la de MITA y el límite (120/min) es por credencial.
+    El límite de PagoOK (120/min) es por credencial.
     """
 
     def __init__(self, por_minuto: int):

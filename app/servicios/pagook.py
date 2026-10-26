@@ -4,6 +4,9 @@
   marcar_usado()  -> POST /pagos/{pago_id}/marcar-usado
 
 Devuelven (status, body). status 0 = error de red o timeout.
+
+Candado de la demo: SOLO pagos de exactamente S/ 1.00. La credencial ve todos los pagos de
+Perú Sistemas Pro; cualquier otro monto se rechaza aquí, antes de llamar a PagoOK.
 """
 import logging
 
@@ -13,6 +16,16 @@ from app import config
 from app.servicios import mocks
 
 log = logging.getLogger("demo.pagook")
+MONTO_DEMO = "1.00"
+
+
+class MontoNoPermitido(ValueError):
+    """La demo intentó consultar o usar un pago que no es de S/ 1.00."""
+
+
+def _exigir_monto_demo(monto) -> None:
+    if f"{monto}".strip() != MONTO_DEMO:
+        raise MontoNoPermitido(f"La demo solo trabaja con pagos de S/ {MONTO_DEMO} (recibió {monto!r})")
 TIMEOUT = 8.0
 SISTEMA = "Demo PSP (demo.perusistemas.pro)"
 
@@ -45,6 +58,7 @@ async def _post(ruta: str, cuerpo: dict) -> tuple[int, dict]:
 
 async def consultar(monto: str, fecha_hora_declarada: str, ventana_minutos: int,
                     nombre_pagador: str) -> tuple[int, dict]:
+    _exigir_monto_demo(monto)
     # Sin `canal`: la billetera es informativa y no debe filtrar (un Plin al número
     # de Yape llega igual como pago al Yape).
     cuerpo = {"monto": monto, "fecha_hora_declarada": fecha_hora_declarada,
@@ -54,7 +68,10 @@ async def consultar(monto: str, fecha_hora_declarada: str, ventana_minutos: int,
     return await _post("/pagos/consultar", cuerpo)
 
 
-async def marcar_usado(pago_id: int, referencia_externa: str) -> tuple[int, dict]:
+async def marcar_usado(pago: dict, referencia_externa: str) -> tuple[int, dict]:
+    """`pago` es el que devolvió consultar(): se verifica su monto antes de marcarlo."""
+    _exigir_monto_demo(pago.get("monto"))
+    pago_id = int(pago["pago_id"])
     cuerpo = {"referencia_externa": referencia_externa, "sistema": SISTEMA}
     if config.MOCK:
         return mocks.pagook_marcar_usado(pago_id, cuerpo)

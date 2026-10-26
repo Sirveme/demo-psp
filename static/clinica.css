@@ -1,0 +1,77 @@
+/* /clinica: dos monitores de caja + contabilidad. Tema oscuro (sin blanco puro). */
+body.clinica .contenedor { max-width: 1240px; }
+body.clinica .intro h1 { font-size: 34px; }
+
+.monitores { display: grid; grid-template-columns: 1fr 1fr 1.15fr; gap: 16px; align-items: stretch; }
+.monitor {
+  display: flex; flex-direction: column; min-height: 420px;
+  background: #0a0c10; border: 2px solid var(--borde); border-radius: 18px; padding: 14px;
+  box-shadow: inset 0 0 0 6px #111419, 0 10px 30px rgba(0, 0, 0, .35);
+}
+.monitor.contabilidad { border-color: #3a3f4a; background: #0c0f14; }
+.monitor-barra { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+                 padding: 4px 6px 12px; border-bottom: 1px solid var(--borde); margin-bottom: 10px; }
+.monitor-barra h2 { font-size: 20px; margin: 0; }
+
+.estado-caja { font-size: 14px; font-weight: 700; padding: 4px 12px; border-radius: 999px; white-space: nowrap;
+               font-variant-numeric: tabular-nums; }
+.estado-caja.libre { color: var(--verde); border: 1px solid var(--verde); }
+.estado-caja.reservada { color: var(--ambar); border: 1px solid var(--ambar); }
+
+.lista-pagos { list-style: none; margin: 0 0 12px; padding: 0; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.lista-pagos .vacio { color: var(--texto-2); text-align: center; padding: 28px 8px; border: 1px dashed var(--borde);
+                      border-radius: 12px; font-size: 16px; }
+.pago { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; padding: 10px 12px; border-radius: 12px;
+        background: var(--superficie); border: 1px solid var(--borde); font-variant-numeric: tabular-nums; }
+.pago-monto { grid-row: span 2; align-self: center; font-size: 24px; font-weight: 800; }
+.pago-linea { font-size: 15px; color: var(--texto-2); }
+.pago-ok { font-size: 15px; font-weight: 700; color: var(--verde); }
+.pago-caja { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; margin-right: 6px;
+             border-radius: 6px; background: var(--superficie-2); color: var(--texto); }
+.pago.nuevo { animation: entra .8s cubic-bezier(.2, .9, .3, 1.2) both, destello 2.2s ease-out both; }
+@keyframes entra { from { transform: translateY(-14px) scale(.96); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes destello { 0% { border-color: var(--verde); box-shadow: 0 0 26px rgba(60, 207, 122, .55); }
+                      100% { border-color: var(--borde); box-shadow: none; } }
+@media (prefers-reduced-motion: reduce) { .pago.nuevo { animation: none; } }
+
+.btn-caja { margin-top: auto; font-size: 18px; padding: 14px; }
+.btn-caja:disabled { background: var(--superficie-2); color: var(--texto-2); cursor: not-allowed; opacity: 1; }
+
+.total-dia { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 12px; padding: 12px;
+             border-radius: 12px; background: var(--superficie); }
+.total-l { width: 100%; color: var(--texto-2); font-size: 14px; text-transform: uppercase; letter-spacing: .06em; }
+.total-n { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.total-c { color: var(--texto-2); }
+
+.confian { margin-top: 28px; padding: 18px; border: 1px solid var(--borde); border-radius: var(--radio); }
+.confian ul { margin: 0; padding-left: 20px; }
+.pie-clinica { margin-top: 24px; }
+
+/* Panel del visitante */
+.panel-fondo { position: fixed; inset: 0; z-index: 20; background: rgba(5, 6, 8, .78); display: flex;
+               align-items: flex-start; justify-content: center; overflow-y: auto; padding: 24px 12px; }
+.panel { position: relative; width: 100%; max-width: 520px; background: var(--fondo); border: 1px solid var(--borde);
+         border-radius: 18px; padding: 22px 18px 24px; }
+.cerrar { position: absolute; top: 8px; right: 10px; width: 44px; height: 44px; border: 0; background: none;
+          color: var(--texto-2); font-size: 30px; line-height: 1; }
+.cerrar:hover { color: var(--texto); }
+.panel h2 { margin-right: 40px; }
+.reloj-reserva { text-align: center; margin: 4px 0 14px; }
+.reloj-reserva span { display: inline-block; font-size: 44px; font-weight: 800; font-variant-numeric: tabular-nums;
+                      color: var(--ambar); border: 2px solid var(--ambar); border-radius: 14px; padding: 2px 18px; }
+.reloj-reserva.poco span { color: var(--rojo-2); border-color: var(--rojo-2); }
+.ancho { display: block; width: 100%; margin-top: 16px; }
+#v-listo .celebra { margin-bottom: 14px; }
+#v-listo .acciones { margin-top: 12px; }
+
+@media (max-width: 1000px) {
+  .monitores { grid-template-columns: 1fr 1fr; }
+  .monitor.contabilidad { grid-column: 1 / -1; min-height: 0; }
+}
+@media (max-width: 640px) {
+  body.clinica .intro h1 { font-size: 27px; }
+  .monitores { grid-template-columns: 1fr; }
+  .monitor { min-height: 0; }
+  .panel-fondo { padding: 0; }
+  .panel { border-radius: 0; min-height: 100%; border: 0; }
+}

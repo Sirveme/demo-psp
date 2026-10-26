@@ -115,7 +115,6 @@
       nombre: $("#nombre").value,
       direccion: $("#direccion").value,
       titular: $("#titular").value,
-      monto: $("#monto").value,
       billetera: form.querySelector("input[name=billetera]:checked").value,
     };
     try {

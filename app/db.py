@@ -51,6 +51,22 @@ class Demo(Base):
     leyenda = Column(Text)
     reemisiones = Column(Integer, default=0)           # referencia_externa DEMO-{id}-R{n} al reemitir
 
+    # Demo de clínica (/clinica): caja reservada 3 min; vale el primer pago de S/ 1.00 dentro de la reserva.
+    caja = Column(String(20))                          # principal | farmacia; NULL en la demo por rubro
+    reserva_hasta = Column(DateTime)                   # fin de la ventana de pago de la caja
+    pago_canal = Column(String(20))                    # yape | plin | ... según PagoOK
+    whatsapp = Column(String(15))                      # opcional: aviso "Pago confirmado" (si hay plantilla)
+    whatsapp_enviado = Column(Boolean, default=False)
+
+
+class Caja(Base):
+    """Una fila por caja de la clínica demo. La reserva es un UPDATE condicional (atómico)."""
+    __tablename__ = "cajas"
+
+    slug = Column(String(20), primary_key=True)
+    demo_id = Column(String(16))                       # demo que la tiene reservada
+    hasta = Column(DateTime)                           # libre cuando hasta < ahora
+
 
 class Interesado(Base):
     __tablename__ = "interesados"
@@ -80,6 +96,12 @@ _MIGRACIONES_PG = [
     "ALTER TABLE demos ALTER COLUMN codigo_sunat TYPE VARCHAR(40)",
     "ALTER TABLE demos ALTER COLUMN mensaje TYPE VARCHAR(500)",
     "ALTER TABLE demos ADD COLUMN IF NOT EXISTS reemisiones INTEGER DEFAULT 0",
+    "ALTER TABLE demos ADD COLUMN IF NOT EXISTS caja VARCHAR(20)",
+    "ALTER TABLE demos ADD COLUMN IF NOT EXISTS reserva_hasta TIMESTAMP",
+    "ALTER TABLE demos ADD COLUMN IF NOT EXISTS pago_canal VARCHAR(20)",
+    "ALTER TABLE demos ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(15)",
+    "ALTER TABLE demos ADD COLUMN IF NOT EXISTS whatsapp_enviado BOOLEAN DEFAULT FALSE",
+    "CREATE INDEX IF NOT EXISTS ix_demos_caja_pago ON demos (caja, pago_en)",
 ]
 
 
@@ -89,6 +111,12 @@ def crear_tablas():
         with engine.begin() as con:
             for sql in _MIGRACIONES_PG:
                 con.execute(text(sql))
+    from app.clinica import CAJAS
+    with Sesion() as s:
+        for slug in CAJAS:
+            if not s.get(Caja, slug):
+                s.add(Caja(slug=slug))
+        s.commit()
 
 
 def recortar(modelo, campos: dict) -> dict:

@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block titulo %}{{ negocio }} · Dos cajas, un solo control · Perú Sistemas Pro{% endblock %}
+{% block clase %}clinica{% endblock %}
+{% block barra %}<span class="chip">🩺 {{ negocio }}</span>{% endblock %}
+{% block contenido %}
+<section class="intro">
+  <p class="antetitulo">Demostración en vivo · PagoOK + Facturalo.pro</p>
+  <h1>{{ negocio }}: dos cajas, <span class="acento">un solo control</span>.</h1>
+  <p class="bajada">Elige una caja y paga S/ 1.00 con Yape o Plin. Tu pago aparece en esa caja y en Contabilidad
+    en segundos, y recibes tu boleta o factura electrónica.</p>
+</section>
+
+<div class="monitores">
+  {% for slug, c in cajas.items() %}
+  <section class="monitor" data-caja="{{ slug }}" aria-labelledby="t-{{ slug }}">
+    <header class="monitor-barra">
+      <h2 id="t-{{ slug }}">{{ c.nombre }}</h2>
+      <span class="estado-caja libre" data-estado>Libre</span>
+    </header>
+    <ol class="lista-pagos" data-pagos aria-live="polite">
+      <li class="vacio">Aún no hay pagos hoy.</li>
+    </ol>
+    <button type="button" class="principal btn-caja" data-pagar="{{ slug }}">Pagar en esta caja</button>
+  </section>
+  {% endfor %}
+
+  <section class="monitor contabilidad" aria-labelledby="t-conta">
+    <header class="monitor-barra">
+      <h2 id="t-conta">Contabilidad — todas las sedes</h2>
+    </header>
+    <p class="total-dia"><span class="total-l">Total del día</span>
+      <span class="total-n">S/ <span id="conta-total">0.00</span></span>
+      <span class="total-c" id="conta-cantidad">0 pagos</span></p>
+    <ol class="lista-pagos" id="conta-pagos" aria-live="polite">
+      <li class="vacio">Aún no hay pagos hoy.</li>
+    </ol>
+  </section>
+</div>
+
+{% if clinicas %}
+<section class="confian">
+  <h2>Clínicas que confían en PagoOK</h2>
+  <ul>{% for c in clinicas %}<li>{{ c.nombre }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<p class="nota pie-clinica">«{{ negocio }}» es un nombre de demostración. Los pagos son reales, de S/ 1.00, a Perú Sistemas Pro,
+  y cada uno emite un comprobante electrónico real a tu nombre.</p>
+
+<!-- Panel del visitante -->
+<div class="panel-fondo" id="panel" hidden>
+  <section class="panel" role="dialog" aria-modal="true" aria-labelledby="panel-titulo">
+    <button type="button" class="cerrar" id="btn-cerrar" aria-label="Cerrar">×</button>
+
+    <div id="v-datos">
+      <p class="antetitulo" id="panel-caja"></p>
+      <h2 id="panel-titulo">Datos para tu comprobante</h2>
+      <form id="form-caja" novalidate>
+        <div class="segmentos" role="radiogroup" aria-label="Tipo de comprobante">
+          <label><input type="radio" name="tipo" value="boleta" checked><span>Boleta</span></label>
+          <label><input type="radio" name="tipo" value="factura"><span>Factura</span></label>
+        </div>
+        <div class="campo">
+          <label for="documento" id="lbl-documento">DNI</label>
+          <input id="documento" inputmode="numeric" autocomplete="off" maxlength="11" placeholder="8 dígitos">
+          <p class="ayuda" id="estado-doc" aria-live="polite"></p>
+          <p class="error" data-error="documento"></p>
+        </div>
+        <div class="campo">
+          <label for="nombre" id="lbl-nombre">Tu nombre</label>
+          <input id="nombre" autocomplete="name" maxlength="200" placeholder="Se completa con tu DNI">
+          <p class="error" data-error="nombre"></p>
+        </div>
+        <div class="campo solo-factura" hidden>
+          <label for="direccion">Dirección fiscal <small>(opcional)</small></label>
+          <input id="direccion" maxlength="250">
+        </div>
+        <div class="campo">
+          <label for="titular">Titular del Yape o Plin con el que vas a pagar</label>
+          <input id="titular" autocomplete="off" maxlength="120" placeholder="Nombre y apellido, como figura en el app">
+          <p class="ayuda">Así reconocemos tu pago aunque otra persona pague en la otra caja al mismo tiempo.</p>
+          <p class="error" data-error="titular"></p>
+        </div>
+        {% if pide_whatsapp %}
+        <div class="campo">
+          <label for="whatsapp">Tu WhatsApp <small>(opcional)</small></label>
+          <input id="whatsapp" inputmode="tel" autocomplete="tel" maxlength="12" placeholder="9 dígitos">
+          <p class="ayuda">Te escribimos «Pago confirmado» apenas llegue tu pago.</p>
+          <p class="error" data-error="whatsapp"></p>
+        </div>
+        {% endif %}
+        <p class="nota">Al tocar «Voy a pagar», la caja queda reservada para ti {{ reserva_min }} minutos.
+          Usamos tus datos solo para emitir tu comprobante.</p>
+        <p class="error general" id="error-general" aria-live="polite"></p>
+        <button class="principal" type="submit" id="btn-voy">Voy a pagar</button>
+      </form>
+    </div>
+
+    <div id="v-pago" hidden>
+      <p class="antetitulo"><span class="caja-nombre"></span> reservada para ti</p>
+      <p class="reloj-reserva" aria-live="off"><span id="reserva-reloj">3:00</span></p>
+      <p class="antetitulo">Paga exactamente</p>
+      <p class="monto-grande">S/ 1.00</p>
+      <div class="numero">
+        <span class="numero-texto">{{ yape[:3] }} {{ yape[3:6] }} {{ yape[6:] }}</span>
+        <button type="button" class="secundario" id="btn-copiar" data-numero="{{ yape }}">Copiar</button>
+      </div>
+      <p class="ayuda centro">Perú Sistemas Pro · Yape o Plin</p>
+      {% if qr_yape %}<img class="qr-yape" src="{{ qr_yape }}" alt="QR de Yape de Perú Sistemas Pro">{% endif %}
+      <p class="estado-vivo centro" id="pago-estado">Esperando tu pago…</p>
+      <button type="button" class="secundario ancho" id="btn-cancelar">Cancelar y liberar la caja</button>
+    </div>
+
+    <div id="v-listo" hidden>
+      <div class="celebra anima">
+        <p class="antetitulo">✓ Pago confirmado</p>
+        <p class="cifra">en <b><span id="listo-seg">0</span> s</b></p>
+        <p class="numero-comp"><span class="caja-nombre"></span> · S/ 1.00 · <span id="listo-medio"></span></p>
+      </div>
+      <p class="estado-vivo centro" id="comp-estado">Emitiendo tu comprobante…</p>
+      <div class="acciones" id="comp-acciones" hidden>
+        <a class="principal" id="btn-pdf" target="_blank" rel="noopener">Ver mi comprobante</a>
+        <a class="secundario" id="btn-descargar">Descargar</a>
+      </div>
+      <button type="button" class="secundario ancho" id="btn-otra">Volver a las cajas</button>
+    </div>
+
+    <div id="v-fin" hidden>
+      <p class="mensaje grande" id="fin-texto"></p>
+      <button type="button" class="principal" id="btn-reintentar">Intentar otra vez</button>
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<link rel="stylesheet" href="/static/clinica.css?v=1">
+<script src="/static/clinica.js?v=1"></script>
+{% endblock %}

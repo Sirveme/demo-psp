@@ -43,12 +43,9 @@
     </div>
 
     <div class="campo">
-      <label for="monto">¿Cuánto vas a pagar?</label>
-      <div class="monto-input"><span>S/</span>
-        <input id="monto" name="monto" inputmode="decimal" value="1.00" maxlength="7">
-      </div>
-      <p class="ayuda">Mínimo S/ 1.00 · máximo S/ {{ "%.2f"|format(monto_maximo) }}</p>
-      <p class="error" data-error="monto"></p>
+      <span class="etiqueta">Vas a pagar</span>
+      <p class="monto-fijo">S/ 1.00</p>
+      <p class="ayuda">Es el monto de la demostración; el comprobante sale por S/ 1.00.</p>
     </div>
 
     <div class="campo">

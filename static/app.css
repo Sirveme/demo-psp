@@ -70,6 +70,7 @@ input[type=text], input:not([type]), input[inputmode], input[type=time] {
 }
 input:focus { outline: 2px solid var(--rojo); outline-offset: 1px; border-color: transparent; }
 .monto-input { display: flex; align-items: center; gap: 8px; }
+.monto-fijo { font-size: 28px; font-weight: 800; margin: 0; }
 .monto-input span { font-size: 22px; font-weight: 700; }
 .ayuda { color: var(--texto-2); font-size: 15px; margin: 6px 0 0; }
 .error { color: var(--rojo-2); font-size: 15px; margin: 6px 0 0; min-height: 0; }

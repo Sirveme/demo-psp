@@ -5,7 +5,7 @@ import re
 import secrets
 from contextlib import asynccontextmanager
 from datetime import timedelta, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import quote
 
@@ -15,10 +15,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app import config, limites, motor
+from app import clinica, config, limites, motor
 from app.db import Demo, Interesado, Sesion, crear_tablas
 from app.rubros import existe, rubro, todos
-from app.servicios import facturalo, identidad, mocks, pagook
+from app.servicios import facturalo, identidad, mocks, pagook, whatsapp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("demo")
@@ -122,50 +122,35 @@ def _limpio(texto, largo: int) -> str:
     return re.sub(r"\s+", " ", str(texto or "")).strip()[:largo]
 
 
-@app.post("/api/demos")
-async def crear_demo(request: Request):
-    _limite("demo", request)
-    try:
-        b = await request.json()
-    except Exception:
-        raise HTTPException(400, "Datos inválidos.")
-    errores = {}
+# La demo solo cobra S/ 1.00: es lo único que puede consultar y usar en PagoOK (app/servicios/pagook.py).
+MONTO_DEMO = Decimal(pagook.MONTO_DEMO)
 
-    slug = b.get("rubro") if existe(b.get("rubro") or "") else "otro"
+
+def _datos_comprobante(b: dict, documento_obligatorio: bool) -> tuple[dict, dict]:
+    """(campos para Demo, errores). Boleta con DNI (opcional u obligatorio) o factura con RUC."""
+    errores = {}
     tipo = "factura" if b.get("tipo") == "factura" else "boleta"
     doc = re.sub(r"\D", "", str(b.get("documento") or ""))
     nombre = _limpio(b.get("nombre"), 200).upper()
-    direccion = _limpio(b.get("direccion"), 250)
-    titular = _limpio(b.get("titular"), 120)
-    billetera = b.get("billetera") if b.get("billetera") in ("yape", "plin", "otra") else "yape"
-
     if tipo == "factura":
         if not identidad.ruc_valido(doc):
             errores["documento"] = "Escribe un RUC válido de 11 dígitos (empieza con 10, 15, 17 o 20)."
         doc_tipo = "6"
-    elif doc:
+    elif doc or documento_obligatorio:
         if not identidad.dni_valido(doc):
-            errores["documento"] = "El DNI debe tener 8 dígitos (o déjalo vacío)."
+            errores["documento"] = ("Escribe tu DNI de 8 dígitos." if documento_obligatorio
+                                    else "El DNI debe tener 8 dígitos (o déjalo vacío).")
         doc_tipo = "1"
     else:
         doc_tipo, doc = "0", "0"
     if len(nombre) < 3:
         errores["nombre"] = "Escribe la razón social." if tipo == "factura" else "Escribe tu nombre."
-    if len(titular.split()) < 2:
-        errores["titular"] = "Escribe nombre y apellido del titular del Yape o Plin."
-    try:
-        monto = Decimal(str(b.get("monto") or "1").replace(",", ".")).quantize(Decimal("0.01"))
-    except InvalidOperation:
-        monto = Decimal("0")
-    if monto < Decimal("1.00"):
-        errores["monto"] = "El monto mínimo es S/ 1.00."
-    elif monto > config.MONTO_MAXIMO:
-        errores["monto"] = f"Para la demo, el monto máximo es S/ {config.MONTO_MAXIMO:.2f}."
-    elif facturalo.precio_sin_igv(monto) is None:
-        opciones = " o ".join(f"S/ {m}" for m in facturalo.montos_cercanos(monto))
-        errores["monto"] = f"Con IGV, S/ {monto:.2f} no cuadra al céntimo en el comprobante. Usa {opciones}."
-    if errores:
-        return JSONResponse({"ok": False, "errores": errores}, status_code=422)
+    campos = {"tipo": tipo, "doc_tipo": doc_tipo, "doc_numero": doc, "cliente_nombre": nombre,
+              "cliente_direccion": _limpio(b.get("direccion"), 250) or None}
+    return campos, errores
+
+
+def _demo_lista_para_cobrar():
     if not (pagook.configurado() and facturalo.configurado()):
         raise HTTPException(503, "La demo aún no está configurada. Avísale al expositor.")
     if (problema := facturalo.problema_series()):
@@ -173,16 +158,98 @@ async def crear_demo(request: Request):
         motor.incidente("-", "configuración", "series", -1, problema)
         raise HTTPException(503, "La demo está en mantenimiento por un momento. Avísale al expositor.")
 
-    demo_id = "".join(secrets.choice(ALFABETO) for _ in range(10))
+
+def _nuevo_id() -> str:
+    return "".join(secrets.choice(ALFABETO) for _ in range(10))
+
+
+@app.post("/api/demos")
+async def crear_demo(request: Request):
+    _limite("demo", request)
+    try:
+        b = await request.json()
+    except Exception:
+        raise HTTPException(400, "Datos inválidos.")
+
+    slug = b.get("rubro") if existe(b.get("rubro") or "") else "otro"
+    campos, errores = _datos_comprobante(b, documento_obligatorio=False)
+    titular = _limpio(b.get("titular"), 120)
+    billetera = b.get("billetera") if b.get("billetera") in ("yape", "plin", "otra") else "yape"
+    if len(titular.split()) < 2:
+        errores["titular"] = "Escribe nombre y apellido del titular del Yape o Plin."
+    if errores:
+        return JSONResponse({"ok": False, "errores": errores}, status_code=422)
+    _demo_lista_para_cobrar()
+
+    demo_id = _nuevo_id()
     with Sesion() as s:
-        s.add(Demo(id=demo_id, rubro=slug, tipo=tipo, doc_tipo=doc_tipo, doc_numero=doc,
-                   cliente_nombre=nombre, cliente_direccion=direccion or None, titular=titular,
-                   monto=monto, billetera=billetera, ip=_ip(request), estado="esperando_pago",
-                   registrado_en=config.ahora(), consultas_pagook=0))
+        s.add(Demo(id=demo_id, rubro=slug, **campos, titular=titular, monto=MONTO_DEMO, billetera=billetera,
+                   ip=_ip(request), estado="esperando_pago", registrado_en=config.ahora(), consultas_pagook=0))
         s.commit()
     motor.asegurar_tarea(demo_id, "esperando_pago")
-    log.info("demo %s creada: %s %s S/ %s", demo_id, slug, tipo, monto)
+    log.info("demo %s creada: %s %s S/ %s", demo_id, slug, campos["tipo"], MONTO_DEMO)
     return {"ok": True, "id": demo_id}
+
+
+# --- API: clínica con dos cajas ---------------------------------------------------------
+@app.post("/api/clinica/reservar")
+async def reservar_caja(request: Request):
+    """"Voy a pagar": valida los datos del comprobante y reserva la caja 3 minutos."""
+    _limite("demo", request)
+    try:
+        b = await request.json()
+    except Exception:
+        raise HTTPException(400, "Datos inválidos.")
+    caja = b.get("caja") if b.get("caja") in clinica.CAJAS else None
+    if not caja:
+        raise HTTPException(400, "Elige una caja.")
+    campos, errores = _datos_comprobante(b, documento_obligatorio=True)
+    titular = _limpio(b.get("titular"), 120)
+    # Obligatorio: con dos cajas esperando a la vez (ambas por S/ 1.00), el nombre es lo único que
+    # distingue de quién es cada pago.
+    if len(titular.split()) < 2:
+        errores["titular"] = "Escribe nombre y apellido del titular del Yape o Plin con el que vas a pagar."
+    celular = None
+    if whatsapp.configurado() and str(b.get("whatsapp") or "").strip():
+        celular = whatsapp.celular_valido(str(b.get("whatsapp")))
+        if not celular:
+            errores["whatsapp"] = "Escribe un celular de 9 dígitos (o déjalo vacío)."
+    if errores:
+        return JSONResponse({"ok": False, "errores": errores}, status_code=422)
+    _demo_lista_para_cobrar()
+
+    demo = Demo(id=_nuevo_id(), rubro="salud", **campos, titular=titular, monto=MONTO_DEMO,
+                billetera="yape", ip=_ip(request), estado="esperando_pago", registrado_en=config.ahora(),
+                consultas_pagook=0, caja=caja, whatsapp=celular, whatsapp_enviado=False)
+    try:
+        clinica.reservar(demo)
+    except clinica.CajaOcupada:
+        return JSONResponse({"ok": False, "ocupada": True, "error": clinica.OCUPADA}, status_code=409)
+    motor.asegurar_tarea(demo.id, "esperando_pago")
+    log.info("demo %s: %s reservada %s s (%s)", demo.id, clinica.CAJAS[caja]["nombre"], clinica.RESERVA_SEG,
+             campos["tipo"])
+    return {"ok": True, "id": demo.id}
+
+
+@app.get("/api/clinica/estado")
+async def estado_clinica():
+    return clinica.estado()
+
+
+@app.post("/api/clinica/{demo_id}/cancelar")
+async def cancelar_reserva(demo_id: str):
+    """El visitante desiste: la caja queda libre al instante. Solo mientras espera el pago."""
+    with Sesion() as s:
+        d = s.get(Demo, demo_id)
+        if not d or not d.caja:
+            raise HTTPException(404, "No encontramos esa reserva.")
+        if d.estado != "esperando_pago":
+            return JSONResponse({"ok": False, "error": "Tu pago ya fue confirmado."}, status_code=409)
+        d.estado, d.mensaje = "cancelado", "Cancelaste la reserva. La caja quedó libre."
+        s.commit()
+    clinica.liberar(demo_id)
+    motor.despertar(demo_id)
+    return {"ok": True}
 
 
 def _demo_json(d: Demo, request: Request) -> dict:
@@ -204,6 +271,13 @@ def _demo_json(d: Demo, request: Request) -> dict:
         "emitiendo_seg": int((ahora - d.pago_en).total_seconds()) if d.pago_en and not d.aceptado_en else None,
         "numero_formato": d.numero_formato, "mensaje_sunat": d.mensaje_sunat, "leyenda": d.leyenda,
     }
+    if d.caja:
+        out["caja"] = d.caja
+        out["caja_nombre"] = clinica.CAJAS[d.caja]["nombre"]
+        out["medio"] = clinica.medio(d.pago_canal) if d.pago_en else None
+        out["reserva_restante_seg"] = max(0, int((d.reserva_hasta - ahora).total_seconds()))
+        out["confirmado_seg"] = (max(1, round((d.pago_detectado_en - d.pago_en).total_seconds()))
+                                 if d.pago_detectado_en and d.pago_en else None)
     if d.facturalo_id:
         out["pdf"] = f"/c/{d.id}.pdf"
         out["descargar"] = f"/c/{d.id}.pdf?descargar=1"
@@ -387,6 +461,15 @@ if config.MOCK:
         return {k: v for k, v in (c or {}).items() if not k.startswith("_")}
 
 
+# --- Clínica: monitores de las dos cajas y contabilidad --------------------------------------
+@app.get("/clinica", response_class=HTMLResponse)
+async def pagina_clinica(request: Request):
+    return plantillas.TemplateResponse(request, "clinica.html", {
+        "cajas": clinica.CAJAS, "negocio": clinica.NEGOCIO, "yape": config.YAPE_NUMERO, "qr_yape": _qr_yape(),
+        "pide_whatsapp": whatsapp.configurado(), "clinicas": clinica.clinicas_autorizadas(),
+        "reserva_min": clinica.RESERVA_SEG // 60})
+
+
 # --- Enlaces por rubro: /ecommerce, /restaurante, ... (al final, para no tapar otras rutas)
 @app.get("/{slug}", response_class=HTMLResponse)
 async def pagina_rubro(slug: str, request: Request):
@@ -394,4 +477,4 @@ async def pagina_rubro(slug: str, request: Request):
         raise HTTPException(404, "No encontramos esa página.")
     return plantillas.TemplateResponse(request, "demo.html", {
         "r": rubro(slug), "yape": config.YAPE_NUMERO, "qr_yape": _qr_yape(),
-        "monto_maximo": config.MONTO_MAXIMO, "whatsapp": config.WHATSAPP_VENTAS})
+        "whatsapp": config.WHATSAPP_VENTAS})

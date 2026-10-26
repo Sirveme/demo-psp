@@ -1,0 +1,4 @@
+{
+  "_instrucciones": "Sección 'Clínicas que confían en PagoOK' de /clinica. Está oculta mientras la lista esté vacía. Agrega una clínica SOLO con su autorización escrita; las tres claves son obligatorias o no se muestra. Ejemplo: {\"nombre\": \"Clínica X\", \"autorizado_por\": \"Nombre y cargo de quien autorizó\", \"autorizado_el\": \"2026-11-05\"}",
+  "clinicas": []
+}

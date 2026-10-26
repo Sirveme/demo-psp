@@ -10,10 +10,10 @@ import re
 from collections import deque
 from datetime import datetime, timedelta
 
-from app import config, limites
+from app import clinica, config, limites
 from app.db import Demo, Sesion, recortar
 from app.rubros import rubro
-from app.servicios import facturalo, pagook
+from app.servicios import facturalo, pagook, whatsapp
 
 log = logging.getLogger("demo.motor")
 
@@ -95,7 +95,8 @@ async def _ciclo(demo_id: str):
     try:
         d = _leer(demo_id)
         if d.estado == "esperando_pago":
-            if not await _vigilar_pago(demo_id):
+            vigilar = _vigilar_pago_caja if d.caja else _vigilar_pago
+            if not await vigilar(demo_id):
                 return
             d = _leer(demo_id)
         if d.estado in ("pago_confirmado", "emitiendo"):
@@ -231,7 +232,7 @@ async def _vigilar_pago(demo_id: str) -> bool:
             continue
 
         if elegido:
-            st, u = await pagook.marcar_usado(elegido["pago_id"], referencia)
+            st, u = await _marcar(demo_id, elegido, referencia)
             if st == 200:
                 pago_en = config.desde_iso(elegido.get("fecha_hora"))
                 detectado = config.ahora()
@@ -239,7 +240,7 @@ async def _vigilar_pago(demo_id: str) -> bool:
                     pago_en = detectado
                 _guardar(demo_id, **cambios, estado="pago_confirmado", mensaje=None,
                          pago_en=pago_en, pago_detectado_en=detectado,
-                         pagook_pago_id=elegido["pago_id"],
+                         pagook_pago_id=elegido["pago_id"], pago_canal=elegido.get("canal"),
                          pagook_contraparte=(elegido.get("contraparte") or "")[:150])
                 return True
             if st == 409:
@@ -250,6 +251,84 @@ async def _vigilar_pago(demo_id: str) -> bool:
                 intervalo = 2
         _guardar(demo_id, **cambios)
         await _dormir(demo_id, intervalo)
+
+
+async def _marcar(demo_id: str, pago: dict, referencia: str) -> tuple[int, dict]:
+    """marcar-usado con el candado de S/ 1.00: un pago de otro monto nunca se marca."""
+    try:
+        return await pagook.marcar_usado(pago, referencia)
+    except pagook.MontoNoPermitido as e:
+        incidente(demo_id, "demo-psp", "marcar-usado bloqueado", -1, str(e))
+        return -1, {}
+
+
+async def _vigilar_pago_caja(demo_id: str) -> bool:
+    """Clínica: el primer pago de S/ 1.00 con hora dentro de la reserva (3 min) es de esta caja."""
+    referencia = f"DEMO-{demo_id}"
+    while True:
+        d = _leer(demo_id)
+        if d.estado != "esperando_pago":
+            return d.estado in ACTIVOS
+        ahora = config.ahora()
+        if ahora > d.reserva_hasta + timedelta(seconds=clinica.GRACIA_SEG):
+            _guardar(demo_id, estado="expirado",
+                     mensaje=f"Pasaron {clinica.RESERVA_SEG // 60} minutos y no vimos tu pago. La caja quedó libre. "
+                             "Si ya pagaste, avísale al expositor.")
+            clinica.liberar(demo_id)
+            return False
+
+        await limites.pagook.tomar()
+        # Una consulta que cubre toda la reserva; la regla exacta (dentro de la ventana) va en elegir_pago.
+        centro = d.registrado_en + (d.reserva_hasta - d.registrado_en) / 2
+        status, r = await pagook.consultar(f"{d.monto:.2f}", config.iso_lima(centro), 3, d.titular or "")
+        cambios = {"consultas_pagook": (d.consultas_pagook or 0) + 1}
+        if status != 200:
+            incidente(demo_id, "PagoOK", "consultar", status, r)
+            _guardar(demo_id, **cambios, mensaje=VERIFICANDO)
+            await _dormir(demo_id, 15 if status == 429 else 3)
+            continue
+
+        cambios["nivel"] = r.get("nivel")
+        candidatos = ([r["pago"]] if r.get("pago") else []) + (r.get("candidatos") or [])
+        elegido = clinica.elegir_pago(candidatos, d.registrado_en, d.reserva_hasta)
+        log.info("demo %s %s PagoOK nivel=%s candidatos=%s elegido=%s", demo_id, d.caja, r.get("nivel"),
+                 _resumen(candidatos), elegido and elegido.get("pago_id"))
+        if elegido:
+            st, u = await _marcar(demo_id, elegido, referencia)
+            if st == 200:
+                detectado = config.ahora()
+                pago_en = config.desde_iso(elegido.get("fecha_hora"))
+                if not pago_en or pago_en > detectado:
+                    pago_en = detectado
+                _guardar(demo_id, **cambios, estado="pago_confirmado", mensaje=None, pago_en=pago_en,
+                         pago_detectado_en=detectado, pagook_pago_id=elegido["pago_id"],
+                         pago_canal=elegido.get("canal"),
+                         pagook_contraparte=(elegido.get("contraparte") or "")[:150])
+                clinica.liberar(demo_id)
+                await _avisar_whatsapp(demo_id)
+                return True
+            if st not in (409, -1):
+                incidente(demo_id, "PagoOK", "marcar-usado", st, u)
+            # 409: otra caja lo tomó primero; se sigue esperando el pago de esta.
+        _guardar(demo_id, **cambios, mensaje=None)
+        await _dormir(demo_id, 2)
+
+
+async def _avisar_whatsapp(demo_id: str):
+    """Best-effort: "Pago confirmado: S/ 1.00 — Caja Farmacia, Clínica Demo". Solo con plantilla aprobada."""
+    d = _leer(demo_id)
+    if not d.whatsapp or d.whatsapp_enviado or not whatsapp.configurado():
+        return
+    ok = await whatsapp.enviar_pago_confirmado(d.whatsapp, f"{d.monto:.2f}", clinica.CAJAS[d.caja]["nombre"],
+                                               clinica.NEGOCIO)
+    if ok:
+        _guardar(demo_id, whatsapp_enviado=True)
+    else:
+        incidente(demo_id, "WhatsApp", "pago confirmado", 0)
+
+
+def concepto(d: Demo) -> str:
+    return clinica.CAJAS[d.caja]["concepto"] if d.caja else rubro(d.rubro)["concepto"]
 
 
 # --- Paso 3: el comprobante --------------------------------------------------------
@@ -289,8 +368,7 @@ async def _emitir(demo_id: str) -> bool:
         _guardar(demo_id, estado="emitiendo", emitido_en=emitido_en, leyenda=texto,
                  mensaje="Emitiendo tu comprobante…" if intento == 1 else "Reintentando la emisión…")
         d = _leer(demo_id)
-        concepto = rubro(d.rubro)["concepto"]
-        cuerpo = facturalo.cuerpo_emision(d, concepto, texto, ref)
+        cuerpo = facturalo.cuerpo_emision(d, concepto(d), texto, ref)
         log.info("demo %s Facturalo emitir tipo=%s serie=%s cliente=%s/%s total=%s ref=%s", demo_id,
                  cuerpo["tipo_comprobante"], cuerpo.get("serie", "(auto)"), cuerpo["cliente"]["tipo_documento"],
                  cuerpo["cliente"]["numero_documento"], d.monto, ref)

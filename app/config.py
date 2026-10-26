@@ -32,12 +32,19 @@ FACTURALO_SERIE_BOLETA = env("FACTURALO_SERIE_BOLETA").upper()
 FACTURALO_SERIE_FACTURA = env("FACTURALO_SERIE_FACTURA").upper()
 
 PAGOOK_BASE_URL = env("PAGOOK_BASE_URL", "https://pagook.pro/api/v1")
-PAGOOK_API_KEY = env("PAGOOK_API_KEY")
-# La credencial se comparte con MITA (límite PagoOK: 120/min). La demo usa como máximo esto.
+PAGOOK_API_KEY = env("PAGOOK_API_KEY")              # credencial propia "Demo PSP" (no la de MITA)
+# Límite de PagoOK: 120 consultas/min por credencial. La demo usa como máximo esto.
 PAGOOK_MAX_POR_MIN = env_int("PAGOOK_MAX_POR_MIN", 60)
 
 YAPE_NUMERO = env("YAPE_NUMERO", "938246208")
 WHATSAPP_VENTAS = env("WHATSAPP_VENTAS", "51967317946")
+
+# Aviso "Pago confirmado" por WhatsApp: apagado mientras falte alguna (ver app/servicios/whatsapp.py).
+WA_ACCESS_TOKEN = env("WA_ACCESS_TOKEN")
+WA_PHONE_NUMBER_ID = env("WA_PHONE_NUMBER_ID")
+WA_PLANTILLA_PAGO = env("WA_PLANTILLA_PAGO")
+WA_PLANTILLA_IDIOMA = env("WA_PLANTILLA_IDIOMA", "es")
+GRAPH_API_VERSION = env("GRAPH_API_VERSION", "v23.0")
 
 APIS_NET_TOKEN = env("APIS_NET_TOKEN")
 APIS_NET_BASE = env("APIS_NET_BASE")                 # opcional; se deduce del token si falta
@@ -45,7 +52,6 @@ RUC_API_URL = env("RUC_API_URL")                     # opcional; API-RUC propia 
 
 SALA_CLAVE = env("SALA_CLAVE")
 PUBLIC_URL = env("PUBLIC_URL").rstrip("/")           # opcional, p. ej. https://demo.perusistemas.pro
-MONTO_MAXIMO = env_int("MONTO_MAXIMO", 100)
 MOCK = env("DEMO_MOCK") == "1"                       # solo local: PagoOK, Facturalo y RUC/DNI simulados
 
 LIMA = timezone(timedelta(hours=-5))                 # Perú no tiene horario de verano
