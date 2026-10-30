@@ -223,7 +223,13 @@
     $$(".caja-nombre").forEach((el) => texto(el, d.caja_nombre || ""));
     if (d.estado === "esperando_pago") {
       vista("pago");
-      texto($("#pago-estado"), d.mensaje || "Esperando tu pago…");
+      // Reserva y detección están desacopladas: al terminar la reserva se oculta el reloj, pero
+      // seguimos buscando el pago. Así quien tarda en volver de Yape igual se confirma.
+      const reservaViva = (d.reserva_restante_seg || 0) > 0;
+      oculto($(".reloj-reserva"), !reservaViva);
+      texto($("#pago-estado"), d.mensaje || (reservaViva
+        ? "Esperando tu pago…"
+        : "Seguimos buscando tu pago… apenas llegue, se confirma solo."));
       return;
     }
     if (["expirado", "cancelado"].includes(d.estado)) {
@@ -248,6 +254,7 @@
   function relojReserva() {
     if (!ultimo || ultimo.estado !== "esperando_pago") return;
     const restante = ultimo.reserva_restante_seg - Math.floor((performance.now() - recibido) / 1000);
+    if (restante <= 0) return;   // reserva terminada: el panel ya muestra "seguimos buscando"
     texto($("#reserva-reloj"), mmss(restante));
     $(".reloj-reserva").classList.toggle("poco", restante <= 30);
   }

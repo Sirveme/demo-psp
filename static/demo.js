@@ -288,9 +288,9 @@
   function reloj() {
     if (!ultimo) return;
     const extra = Math.floor((performance.now() - recibido) / 1000);
-    if (ultimo.estado === "esperando_pago") {
-      texto($("#p2-reloj"), mmss(ultimo.esperando_seg + extra));
-    } else if (ultimo.emitiendo_seg != null && ultimo.estado !== "aceptado") {
+    // Sin cuenta regresiva mientras espera el pago: solo "Esperando tu pago…". El único reloj
+    // que queda es el de la emisión del comprobante (paso 3), que sí es un tiempo útil de mostrar.
+    if (ultimo.emitiendo_seg != null && ultimo.estado !== "aceptado") {
       texto($("#p3-reloj"), mmss(ultimo.emitiendo_seg + extra));
       const t = ultimo.estado === "pago_confirmado" || ultimo.estado === "emitiendo"
         ? "Emitiendo tu comprobante…" : "Esperando la respuesta de SUNAT…";

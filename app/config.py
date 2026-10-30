@@ -55,7 +55,9 @@ PUBLIC_URL = env("PUBLIC_URL").rstrip("/")           # opcional, p. ej. https://
 MOCK = env("DEMO_MOCK") == "1"                       # solo local: PagoOK, Facturalo y RUC/DNI simulados
 
 LIMA = timezone(timedelta(hours=-5))                 # Perú no tiene horario de verano
-VENTANA_PAGO_SEG = 10 * 60
+# Cuánto tiempo seguimos buscando el pago de una demo (genérica). Amplio porque la persona
+# sale a Yape, a veces tarda varios minutos y recién vuelve: el pago debe seguir calzando.
+VENTANA_PAGO_SEG = 15 * 60
 
 
 def ahora() -> datetime:

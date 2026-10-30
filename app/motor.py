@@ -7,8 +7,9 @@ import asyncio
 import json
 import logging
 import re
+import unicodedata
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app import clinica, config, limites
 from app.db import Demo, Sesion, recortar
@@ -176,9 +177,61 @@ def elegir_candidato(candidatos: list[dict], registrado_en: datetime,
     return None, VERIFICANDO
 
 
+def _tokens_nombre(s: str | None) -> list[str]:
+    s = unicodedata.normalize("NFKD", s or "")
+    s = "".join(c for c in s if not unicodedata.combining(c)).lower()
+    return [t for t in re.split(r"[^a-z0-9ñ]+", s) if t]
+
+
+def _mismo_titular(nombre_pago: str | None, titular: str | None) -> bool:
+    """Match tolerante con nombres truncados por Yape ('Erwin Sch*' ~ 'Erwin Schipper').
+    Exige dos palabras compatibles (una puede ser prefijo de la otra) o mismo primer nombre."""
+    A, B = _tokens_nombre(nombre_pago), _tokens_nombre(titular)
+    if not A or not B:
+        return False
+    def calza(x, ys):
+        return any(x == y or (len(x) >= 3 and y.startswith(x)) or (len(y) >= 3 and x.startswith(y))
+                   for y in ys)
+    comunes = sum(1 for x in A if calza(x, B))
+    return comunes >= 2 or (A[0] == B[0] and comunes >= 1)
+
+
+async def _aviso_otro_monto(d: Demo) -> str | None:
+    """¿Llegó un pago de ESTE titular pero con otro monto (ej. pagó S/ 2 en vez de S/ 1)?
+    Devuelve el texto para la pantalla, o None. Lectura; no reclama nada."""
+    await limites.pagook.tomar()
+    # `desde` SIN zona = UTC, igual que registrado_en y recibido_en en PagoOK.
+    desde = (d.registrado_en - timedelta(seconds=90)).isoformat()
+    status, r = await pagook.pagos_recientes(desde)
+    if status != 200:
+        return None
+    demo_monto = float(pagook.MONTO_DEMO)
+    for p in r.get("pagos") or []:
+        try:
+            m = float(p.get("monto"))
+        except (TypeError, ValueError):
+            continue
+        if abs(m - demo_monto) < 0.005:
+            continue  # es S/ 1.00: ese sí es el pago de la demo, no "otro monto"
+        hora = str(p.get("hora") or "").replace("Z", "+00:00")
+        try:
+            cuando = datetime.fromisoformat(hora)
+        except ValueError:
+            continue
+        if cuando.tzinfo is not None:
+            cuando = cuando.astimezone(timezone.utc).replace(tzinfo=None)
+        if cuando < d.registrado_en - timedelta(seconds=60):
+            continue
+        if _mismo_titular(p.get("nombre"), d.titular):
+            return (f"Recibimos S/ {m:.2f} tuyo, pero esta demo es de S/ 1.00. "
+                    "Vuelve a yapear S/ 1.00 para continuar.")
+    return None
+
+
 async def _vigilar_pago(demo_id: str) -> bool:
     """Devuelve True cuando el pago quedó confirmado y marcado como usado."""
     referencia = f"DEMO-{demo_id}"
+    proximo_otro = config.ahora()   # cada cuánto chequear un pago del mismo titular con otro monto
     while True:
         d = _leer(demo_id)
         if d.estado != "esperando_pago":
@@ -186,14 +239,17 @@ async def _vigilar_pago(demo_id: str) -> bool:
         edad = (config.ahora() - d.registrado_en).total_seconds()
         if edad > config.VENTANA_PAGO_SEG:
             _guardar(demo_id, estado="expirado",
-                     mensaje="Pasaron 10 minutos y no vimos tu pago. Si ya pagaste, avísale al expositor.")
+                     mensaje=f"Pasaron {config.VENTANA_PAGO_SEG // 60} minutos y no vimos tu pago. "
+                             "Si ya pagaste, avísale al expositor.")
             return False
         intervalo = 3 if edad < 180 else 5
 
         await limites.pagook.tomar()
         hora = d.voucher_hora
         if hora:
-            declarada, ventana = _voucher_iso(hora), 3
+            # ±15 min: la hora del voucher se escribe a mano (solo HH:MM) y el banco puede
+            # entregar el aviso con algunos minutos de retraso. Antes era ±3 y se caía fácil.
+            declarada, ventana = _voucher_iso(hora), 15
         else:
             declarada, ventana = config.iso_lima(config.ahora()), 10
         status, r = await pagook.consultar(f"{d.monto:.2f}", declarada, ventana, d.titular)
@@ -225,6 +281,14 @@ async def _vigilar_pago(demo_id: str) -> bool:
             cambios["mensaje"] = f"Aún no aparece a las {hora}, seguimos buscando…"
         else:
             cambios["mensaje"] = None
+
+        # ¿Pagó pero con otro monto (ej. S/ 2 en vez de S/ 1)? Se chequea cada ~20 s para no
+        # duplicar el gasto de consultas; su mensaje manda sobre el genérico "seguimos buscando".
+        if not elegido and config.ahora() >= proximo_otro:
+            proximo_otro = config.ahora() + timedelta(seconds=20)
+            aviso = await _aviso_otro_monto(d)
+            if aviso:
+                cambios["mensaje"] = aviso
 
         if not elegido and _leer(demo_id).voucher_hora != hora:
             # Llegó una hora de voucher mientras consultábamos: este resultado ya no aplica.
@@ -263,34 +327,42 @@ async def _marcar(demo_id: str, pago: dict, referencia: str) -> tuple[int, dict]
 
 
 async def _vigilar_pago_caja(demo_id: str) -> bool:
-    """Clínica: el primer pago de S/ 1.00 con hora dentro de la reserva (3 min) es de esta caja."""
+    """Clínica: el pago de S/ 1.00 de esta persona es de esta caja (lo distingue el nombre).
+
+    Reserva de caja y detección del pago están DESACOPLADAS: la caja se libera sola al vencer
+    `hasta` (reserva + gracia), pero seguimos buscando el pago hasta `DETECCION_SEG`, así quien
+    tarda varios minutos en volver de Yape igual se confirma sin tener la caja tomada tanto rato.
+    """
     referencia = f"DEMO-{demo_id}"
     while True:
         d = _leer(demo_id)
         if d.estado != "esperando_pago":
             return d.estado in ACTIVOS
         ahora = config.ahora()
-        if ahora > d.reserva_hasta + timedelta(seconds=clinica.GRACIA_SEG):
+        reserva_viva = ahora <= d.reserva_hasta + timedelta(seconds=clinica.GRACIA_SEG)
+        if ahora > d.registrado_en + timedelta(seconds=clinica.DETECCION_SEG):
             _guardar(demo_id, estado="expirado",
-                     mensaje=f"Pasaron {clinica.RESERVA_SEG // 60} minutos y no vimos tu pago. La caja quedó libre. "
+                     mensaje=f"Pasaron {clinica.DETECCION_SEG // 60} minutos y no vimos tu pago. "
                              "Si ya pagaste, avísale al expositor.")
             clinica.liberar(demo_id)
             return False
 
         await limites.pagook.tomar()
-        # Una consulta que cubre toda la reserva; la regla exacta (dentro de la ventana) va en elegir_pago.
-        centro = d.registrado_en + (d.reserva_hasta - d.registrado_en) / 2
-        status, r = await pagook.consultar(f"{d.monto:.2f}", config.iso_lima(centro), 3, d.titular or "")
+        # Ventana amplia alrededor de AHORA: cubre desde el registro hasta ahora, de modo que un
+        # pago que llega tarde (ya liberada la caja) igual aparece. El filtro fino lo hace elegir_pago.
+        status, r = await pagook.consultar(f"{d.monto:.2f}", config.iso_lima(ahora),
+                                           clinica.DETECCION_SEG // 60, d.titular or "")
         cambios = {"consultas_pagook": (d.consultas_pagook or 0) + 1}
         if status != 200:
             incidente(demo_id, "PagoOK", "consultar", status, r)
             _guardar(demo_id, **cambios, mensaje=VERIFICANDO)
-            await _dormir(demo_id, 15 if status == 429 else 3)
+            await _dormir(demo_id, 15 if status == 429 else (3 if reserva_viva else 6))
             continue
 
         cambios["nivel"] = r.get("nivel")
         candidatos = ([r["pago"]] if r.get("pago") else []) + (r.get("candidatos") or [])
-        elegido = clinica.elegir_pago(candidatos, d.registrado_en, d.reserva_hasta)
+        # `fin = ahora`: acepta pagos hasta el momento actual, no solo dentro de la reserva.
+        elegido = clinica.elegir_pago(candidatos, d.registrado_en, ahora)
         log.info("demo %s %s PagoOK nivel=%s candidatos=%s elegido=%s", demo_id, d.caja, r.get("nivel"),
                  _resumen(candidatos), elegido and elegido.get("pago_id"))
         if elegido:
@@ -311,7 +383,8 @@ async def _vigilar_pago_caja(demo_id: str) -> bool:
                 incidente(demo_id, "PagoOK", "marcar-usado", st, u)
             # 409: otra caja lo tomó primero; se sigue esperando el pago de esta.
         _guardar(demo_id, **cambios, mensaje=None)
-        await _dormir(demo_id, 2)
+        # Mientras la caja está reservada, mira seguido (2 s); ya liberada, más espaciado (6 s).
+        await _dormir(demo_id, 2 if reserva_viva else 6)
 
 
 async def _avisar_whatsapp(demo_id: str):

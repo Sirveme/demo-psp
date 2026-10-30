@@ -68,6 +68,28 @@ async def consultar(monto: str, fecha_hora_declarada: str, ventana_minutos: int,
     return await _post("/pagos/consultar", cuerpo)
 
 
+async def pagos_recientes(desde_iso: str, limite: int = 50) -> tuple[int, dict]:
+    """GET /pagos: lista los pagos recientes de la empresa (TODOS los montos).
+
+    Solo lectura: no reclama ni marca nada, así que NO pasa por el candado de S/ 1.00.
+    Sirve para avisar "recibimos S/ X tuyo, pero esta demo es de S/ 1.00".
+    `desde_iso` sin zona = hora UTC (igual que recibido_en en PagoOK).
+    """
+    if config.MOCK:
+        return 200, {"pagos": []}
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as cli:
+            r = await cli.get(_base() + "/pagos", headers=_headers(),
+                              params={"desde": desde_iso, "limit": limite})
+    except Exception as e:
+        log.warning("PagoOK /pagos: %s", e)
+        return 0, {}
+    try:
+        return r.status_code, r.json()
+    except Exception:
+        return r.status_code, {}
+
+
 async def marcar_usado(pago: dict, referencia_externa: str) -> tuple[int, dict]:
     """`pago` es el que devolvió consultar(): se verifica su monto antes de marcarlo."""
     _exigir_monto_demo(pago.get("monto"))

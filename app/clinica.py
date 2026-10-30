@@ -17,9 +17,13 @@ from app.db import Caja, Demo, Sesion
 
 NEGOCIO = "Clínica Demo"
 MONTO = Decimal("1.00")
+# Reserva de caja: cuánto tiempo la caja queda tomada para esta persona (y bloqueada para otras).
 RESERVA_SEG = 3 * 60
-# Tras el fin de la reserva se sigue mirando unos segundos: el aviso del banco puede llegar a
-# PagoOK con un pequeño retraso. Solo cuentan pagos con hora DENTRO de la reserva.
+# Detección del pago: cuánto tiempo seguimos BUSCANDO el pago de esta persona, aunque la caja ya
+# se haya liberado para otros. Desacopla "reservar la caja" de "encontrar el pago": alguien que
+# tarda varios minutos en ir a Yape y volver igual se confirma, sin tener la caja tomada tanto rato.
+DETECCION_SEG = 15 * 60
+# Tras el fin de la reserva se sigue mirando: el aviso del banco puede llegar con retraso.
 GRACIA_SEG = 15
 # Diferencia de reloj tolerada entre este servidor y PagoOK al inicio de la reserva.
 TOLERANCIA_INICIO_SEG = 5
