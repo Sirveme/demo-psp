@@ -68,6 +68,11 @@
   <p class="antetitulo">Yapea exactamente</p>
   <p class="monto-grande">S/ <span id="p2-monto">1.00</span></p>
 
+  <div class="aviso-monto" id="p2-aviso" role="alert" hidden>
+    <p class="aviso-monto-texto" id="p2-aviso-texto"></p>
+    <button type="button" class="aviso-monto-cerrar" id="p2-aviso-cerrar" aria-label="Cerrar aviso">✕</button>
+  </div>
+
   <div class="vigilancia" aria-live="polite">
     <p class="estado-vivo" id="p2-estado"><span id="p2-estado-texto">Esperando tu pago… apenas llegue lo verás aquí.</span></p>
     <p class="mensaje" id="p2-mensaje" hidden></p>
@@ -158,5 +163,5 @@
 {% endblock %}
 {% block scripts %}
 <script>window.DEMO = {rubro: {{ r.slug|tojson }}};</script>
-<script src="/static/demo.js?v=2"></script>
+<script src="/static/demo.js?v=3"></script>
 {% endblock %}

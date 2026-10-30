@@ -257,6 +257,7 @@ def _demo_json(d: Demo, request: Request) -> dict:
     ahora = config.ahora()
     out = {
         "ok": True, "id": d.id, "estado": d.estado, "nivel": d.nivel, "mensaje": d.mensaje,
+        "aviso_monto": d.aviso_monto,
         "rubro": {"slug": r["slug"], "nombre": r["nombre"], "que_destraba": r["que_destraba"]},
         "tipo": d.tipo, "monto": f"{d.monto:.2f}", "billetera": d.billetera,
         "titular": d.titular, "cliente_nombre": d.cliente_nombre, "voucher_hora": d.voucher_hora,

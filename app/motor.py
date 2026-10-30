@@ -238,7 +238,7 @@ async def _vigilar_pago(demo_id: str) -> bool:
             return d.estado in ACTIVOS
         edad = (config.ahora() - d.registrado_en).total_seconds()
         if edad > config.VENTANA_PAGO_SEG:
-            _guardar(demo_id, estado="expirado",
+            _guardar(demo_id, estado="expirado", aviso_monto=None,
                      mensaje=f"Pasaron {config.VENTANA_PAGO_SEG // 60} minutos y no vimos tu pago. "
                              "Si ya pagaste, avísale al expositor.")
             return False
@@ -283,12 +283,11 @@ async def _vigilar_pago(demo_id: str) -> bool:
             cambios["mensaje"] = None
 
         # ¿Pagó pero con otro monto (ej. S/ 2 en vez de S/ 1)? Se chequea cada ~20 s para no
-        # duplicar el gasto de consultas; su mensaje manda sobre el genérico "seguimos buscando".
+        # duplicar el gasto de consultas. Va en su propia columna `aviso_monto` (persiste hasta
+        # que el visitante lo cierre o llegue el pago correcto); NO pisa el `mensaje` de estado.
         if not elegido and config.ahora() >= proximo_otro:
             proximo_otro = config.ahora() + timedelta(seconds=20)
-            aviso = await _aviso_otro_monto(d)
-            if aviso:
-                cambios["mensaje"] = aviso
+            cambios["aviso_monto"] = await _aviso_otro_monto(d)
 
         if not elegido and _leer(demo_id).voucher_hora != hora:
             # Llegó una hora de voucher mientras consultábamos: este resultado ya no aplica.
@@ -302,7 +301,7 @@ async def _vigilar_pago(demo_id: str) -> bool:
                 detectado = config.ahora()
                 if not pago_en or pago_en > detectado:
                     pago_en = detectado
-                _guardar(demo_id, **cambios, estado="pago_confirmado", mensaje=None,
+                _guardar(demo_id, **cambios, estado="pago_confirmado", mensaje=None, aviso_monto=None,
                          pago_en=pago_en, pago_detectado_en=detectado,
                          pagook_pago_id=elegido["pago_id"], pago_canal=elegido.get("canal"),
                          pagook_contraparte=(elegido.get("contraparte") or "")[:150])
@@ -334,6 +333,7 @@ async def _vigilar_pago_caja(demo_id: str) -> bool:
     tarda varios minutos en volver de Yape igual se confirma sin tener la caja tomada tanto rato.
     """
     referencia = f"DEMO-{demo_id}"
+    proximo_otro = config.ahora()   # cada cuánto chequear un pago del mismo titular con otro monto
     while True:
         d = _leer(demo_id)
         if d.estado != "esperando_pago":
@@ -341,7 +341,7 @@ async def _vigilar_pago_caja(demo_id: str) -> bool:
         ahora = config.ahora()
         reserva_viva = ahora <= d.reserva_hasta + timedelta(seconds=clinica.GRACIA_SEG)
         if ahora > d.registrado_en + timedelta(seconds=clinica.DETECCION_SEG):
-            _guardar(demo_id, estado="expirado",
+            _guardar(demo_id, estado="expirado", aviso_monto=None,
                      mensaje=f"Pasaron {clinica.DETECCION_SEG // 60} minutos y no vimos tu pago. "
                              "Si ya pagaste, avísale al expositor.")
             clinica.liberar(demo_id)
@@ -372,8 +372,8 @@ async def _vigilar_pago_caja(demo_id: str) -> bool:
                 pago_en = config.desde_iso(elegido.get("fecha_hora"))
                 if not pago_en or pago_en > detectado:
                     pago_en = detectado
-                _guardar(demo_id, **cambios, estado="pago_confirmado", mensaje=None, pago_en=pago_en,
-                         pago_detectado_en=detectado, pagook_pago_id=elegido["pago_id"],
+                _guardar(demo_id, **cambios, estado="pago_confirmado", mensaje=None, aviso_monto=None,
+                         pago_en=pago_en, pago_detectado_en=detectado, pagook_pago_id=elegido["pago_id"],
                          pago_canal=elegido.get("canal"),
                          pagook_contraparte=(elegido.get("contraparte") or "")[:150])
                 clinica.liberar(demo_id)
@@ -382,6 +382,10 @@ async def _vigilar_pago_caja(demo_id: str) -> bool:
             if st not in (409, -1):
                 incidente(demo_id, "PagoOK", "marcar-usado", st, u)
             # 409: otra caja lo tomó primero; se sigue esperando el pago de esta.
+        # ¿Pagó S/ 1.00 bien de nombre pero con otro monto? Mismo aviso persistente que /demo.
+        if not elegido and config.ahora() >= proximo_otro:
+            proximo_otro = config.ahora() + timedelta(seconds=20)
+            cambios["aviso_monto"] = await _aviso_otro_monto(d)
         _guardar(demo_id, **cambios, mensaje=None)
         # Mientras la caja está reservada, mira seguido (2 s); ya liberada, más espaciado (6 s).
         await _dormir(demo_id, 2 if reserva_viva else 6)

@@ -85,6 +85,7 @@
   let demoId = new URLSearchParams(location.search).get("d");
   let ultimo = null;
   let recibido = 0;
+  let avisoDescartado = null;   // texto del aviso de monto que el visitante cerró con la ✕
 
   function vista(nombre) {
     ["datos", "pago", "listo", "fin"].forEach((v) => oculto($("#v-" + v), v !== nombre));
@@ -96,8 +97,20 @@
     if (ultimo && ["aceptado", "expirado", "cancelado", "rechazado", "error_emision"].includes(ultimo.estado)) olvidar();
   }
   function olvidar() {
-    demoId = null; ultimo = null;
+    demoId = null; ultimo = null; avisoDescartado = null;
     history.replaceState(null, "", location.pathname);
+  }
+  // Aviso de monto distinto: se queda hasta que el visitante lo cierra con la ✕, recarga o llega
+  // el pago correcto. Las consultas periódicas no lo borran; otro monto distinto cambia su texto.
+  function pintarAviso(t) {
+    const aviso = $("#clinica-aviso");
+    if (t && t !== avisoDescartado) {
+      texto($("#clinica-aviso-texto"), t);
+      oculto(aviso, false);
+    } else {
+      oculto(aviso, true);
+      if (!t) avisoDescartado = null;
+    }
   }
   function errores(map) {
     $$("[data-error]").forEach((el) => { el.textContent = (map || {})[el.dataset.error] || ""; });
@@ -218,6 +231,10 @@
   });
   $("#btn-reintentar").addEventListener("click", () => { olvidar(); cerrarPanel(); });
   $("#btn-otra").addEventListener("click", () => { olvidar(); cerrarPanel(); });
+  $("#clinica-aviso-cerrar").addEventListener("click", () => {
+    avisoDescartado = (ultimo && ultimo.aviso_monto) || "";
+    oculto($("#clinica-aviso"), true);
+  });
 
   function pintarDemo(d) {
     $$(".caja-nombre").forEach((el) => texto(el, d.caja_nombre || ""));
@@ -230,6 +247,7 @@
       texto($("#pago-estado"), d.mensaje || (reservaViva
         ? "Esperando tu pago…"
         : "Seguimos buscando tu pago… apenas llegue, se confirma solo."));
+      pintarAviso(d.aviso_monto || "");
       return;
     }
     if (["expirado", "cancelado"].includes(d.estado)) {

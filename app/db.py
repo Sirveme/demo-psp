@@ -30,7 +30,10 @@ class Demo(Base):
     # (expirado si no llega el pago en 10 min; error_emision si Facturalo rechaza los datos)
     estado = Column(String(20), nullable=False, default="esperando_pago")
     nivel = Column(String(20))                         # último nivel de PagoOK
-    mensaje = Column(String(500))                      # texto simple para la pantalla
+    mensaje = Column(String(500))                      # texto simple para la pantalla (transitorio)
+    # Aviso de monto distinto ("pagaste S/ 2, la demo es de S/ 1"). Persiste en su propia
+    # columna para que las consultas periódicas no lo borren; se limpia al confirmarse el pago.
+    aviso_monto = Column(String(500))
     voucher_hora = Column(String(5))                   # HH:MM declarada por la persona
 
     registrado_en = Column(DateTime, nullable=False)
@@ -101,6 +104,7 @@ _MIGRACIONES_PG = [
     "ALTER TABLE demos ADD COLUMN IF NOT EXISTS pago_canal VARCHAR(20)",
     "ALTER TABLE demos ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(15)",
     "ALTER TABLE demos ADD COLUMN IF NOT EXISTS whatsapp_enviado BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE demos ADD COLUMN IF NOT EXISTS aviso_monto VARCHAR(500)",
     "CREATE INDEX IF NOT EXISTS ix_demos_caja_pago ON demos (caja, pago_en)",
 ]
 

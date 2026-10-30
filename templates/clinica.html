@@ -101,6 +101,10 @@
       <p class="reloj-reserva" aria-live="off"><span id="reserva-reloj">3:00</span></p>
       <p class="antetitulo">Paga exactamente</p>
       <p class="monto-grande">S/ 1.00</p>
+      <div class="aviso-monto" id="clinica-aviso" role="alert" hidden>
+        <p class="aviso-monto-texto" id="clinica-aviso-texto"></p>
+        <button type="button" class="aviso-monto-cerrar" id="clinica-aviso-cerrar" aria-label="Cerrar aviso">✕</button>
+      </div>
       <div class="numero">
         <span class="numero-texto">{{ yape[:3] }} {{ yape[3:6] }} {{ yape[6:] }}</span>
         <button type="button" class="secundario" id="btn-copiar" data-numero="{{ yape }}">Copiar</button>
@@ -134,5 +138,5 @@
 {% endblock %}
 {% block scripts %}
 <link rel="stylesheet" href="/static/clinica.css?v=1">
-<script src="/static/clinica.js?v=1"></script>
+<script src="/static/clinica.js?v=2"></script>
 {% endblock %}

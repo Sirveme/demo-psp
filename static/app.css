@@ -110,6 +110,15 @@ button, .principal, .secundario { font: inherit; cursor: pointer; text-decoratio
 .numero { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
 .numero-texto { font-size: 34px; font-weight: 800; letter-spacing: .04em; }
 .vigilancia { margin: 0 0 12px; padding: 12px 14px; border-radius: var(--radio); background: var(--superficie); border: 1px solid var(--borde); text-align: center; }
+/* Aviso de monto distinto: permanece hasta que el visitante lo cierra, recarga o llega el pago
+   correcto. Borde ámbar para destacar; texto de alto contraste, legible en el celular. */
+.aviso-monto { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 14px; padding: 13px 12px 13px 16px;
+  background: var(--superficie-2); border: 1px solid var(--ambar); border-left: 4px solid var(--ambar); border-radius: var(--radio); }
+.aviso-monto-texto { flex: 1; margin: 0; color: var(--texto); font-size: 17px; font-weight: 600; line-height: 1.4; }
+.aviso-monto-cerrar { flex: none; width: 34px; height: 34px; padding: 0; margin: -4px -2px 0 0; background: transparent;
+  border: none; border-radius: 8px; color: var(--texto-2); font-size: 18px; line-height: 1; cursor: pointer; }
+.aviso-monto-cerrar:hover { color: var(--texto); background: var(--superficie); }
+.aviso-monto-cerrar:focus-visible { outline: 2px solid var(--ambar); outline-offset: 1px; }
 .estado-vivo { font-size: 20px; font-weight: 600; margin: 0; font-variant-numeric: tabular-nums; }
 .mensaje { color: var(--ambar); margin: 10px 0 0; }
 .mensaje.grande { font-size: 20px; }

@@ -9,6 +9,7 @@
   let recibido = 0;             // performance.now() de esa respuesta
   let animado = false;
   let consultando = false;
+  let avisoDescartado = null;   // texto del aviso de monto que el visitante cerró con la ✕
 
   // ---------- utilidades ----------
   const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, "0")}`;
@@ -41,6 +42,20 @@
   // Escribe solo si el contenido cambió (no toca el DOM en cada consulta).
   function texto(el, t) { if (el.textContent !== t) el.textContent = t; }
   function oculto(el, h) { if (el.hidden !== h) el.hidden = h; }
+
+  // Aviso de monto distinto: se queda visible hasta que el visitante lo cierra con la ✕, recarga
+  // la página o llega el pago correcto. Las consultas periódicas no lo borran; si llega otro monto
+  // distinto, cambia el texto del MISMO aviso (y vuelve a mostrarse aunque lo hubiera cerrado).
+  function pintarAviso(t) {
+    const aviso = $("#p2-aviso");
+    if (t && t !== avisoDescartado) {
+      texto($("#p2-aviso-texto"), t);
+      oculto(aviso, false);
+    } else {
+      oculto(aviso, true);
+      if (!t) avisoDescartado = null;   // sin aviso: uno futuro volverá a mostrarse
+    }
+  }
 
   function errores(map, atributo = "data-error") {
     $$(`[${atributo}]`).forEach((el) => { el.textContent = (map || {})[el.getAttribute(atributo)] || ""; });
@@ -141,6 +156,11 @@
   });
 
   // ---------- Paso 2 ----------
+  $("#p2-aviso-cerrar").addEventListener("click", () => {
+    avisoDescartado = (ultimo && ultimo.aviso_monto) || "";
+    oculto($("#p2-aviso"), true);
+  });
+
   $("#btn-copiar").addEventListener("click", async (e) => {
     const b = e.currentTarget;
     try {
@@ -192,6 +212,7 @@
     demoId = null;
     history.replaceState(null, "", location.pathname);
     ultimo = null;
+    avisoDescartado = null;
     mostrarPaso(1);
   });
 
@@ -244,6 +265,7 @@
       const general = voucherServidor ? "" : (d.mensaje || "");
       texto(msg, general);
       oculto(msg, !general);
+      pintarAviso(expirado ? "" : (d.aviso_monto || ""));
       $("#form-voucher").classList.toggle("destacado", d.nivel === "media" && !voucherServidor);
       if (voucherServidor && !$("#voucher-hora").value && document.activeElement !== $("#voucher-hora")) {
         $("#voucher-hora").value = voucherServidor;
